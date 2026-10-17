@@ -1,0 +1,17 @@
+{
+  "name": "run-on-phone-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Packages a Node.js project and publishes it to Firestore for the Run on Phone Android app",
+  "bin": {
+    "run-on-phone-publish": "publish.mjs"
+  },
+  "scripts": {
+    "publish-project": "node publish.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "firebase-admin": "^13.4.0"
+  }
+}

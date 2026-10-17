@@ -1,0 +1,22 @@
+.gradle/
+build/
+/app/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Secrets
+firebase.properties
+publisher/service-account.json
+publisher/node_modules/
+
+# Downloaded by tools/fetch-runtime.mjs (large binaries)
+app/src/main/jniLibs/
+app/src/main/assets/runtime/
+
+# Local publish state (holds the code of your own Firebase)
+.run-on-phone-state.json

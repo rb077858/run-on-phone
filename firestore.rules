@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Run on Phone:
+// - The phone app reads projects anonymously, but only by exact code (get), never by
+//   listing, so codes can't be enumerated.
+// - Only the PC publisher writes, using a service account (which bypasses these rules).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /projects/{code} {
+      allow get: if true;
+      allow list, write: if false;
+
+      match /chunks/{chunk} {
+        allow get: if true;
+        allow list, write: if false;
+      }
+    }
+  }
+}

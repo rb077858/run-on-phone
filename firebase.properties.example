@@ -1,0 +1,7 @@
+# Copy this file to firebase.properties and fill in your Firebase project values.
+# Firebase console -> Project settings -> General:
+#   "Project ID"      -> projectId
+#   "Web API Key"     -> apiKey   (add a Web app to the project if no key is shown)
+# These become the app's defaults; they can also be changed inside the app (Settings).
+projectId=
+apiKey=
