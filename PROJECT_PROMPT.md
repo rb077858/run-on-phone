@@ -1,63 +1,97 @@
 # פרומפט להדבקה בסשן של פרויקט
 
-העתק את כל מה שמתחת לקו והדבק בסשן Claude Code שבו בנית (או בונה) את הפרויקט.
+מדביקים את כל מה שמתחת לקו בכל סשן Claude Code שבו כבר יש פרויקט (חדש או קיים). Claude יתאים את הפרויקט, יפרסם אותו, ויחזיר קוד בן 6 ספרות להזנה באפליקציה. אם הפרויקט כבר פורסם בעבר, הקוד יישאר אותו קוד והגרסה תתעדכן.
 
 ---
 
-I want this project to run 24/7 on my Android phone using my app **"Run on Phone"**. Please make the project compatible, publish it, and give me its 6-digit code. Talk to me in Hebrew.
+# Run this project on my phone: give me a 6-digit code
 
-## How the phone runs projects
+I have an Android app called **"Run on Phone"** that runs Node.js projects 24/7 in the background. You add a project to it with a 6-digit code. **Your job: take the project in this session and get it running on the phone, all the way to a code.** Work on your own. Ask me only if you are truly blocked (for example a missing secret that only I have). Make the minimum changes needed, and keep the project working on the PC too. Talk to me in Hebrew.
 
-- The phone runs **Node.js 24 (linux/arm64, Android)** — a real `node` binary, one separate process per project, kept alive in the background, auto-restarted 3s→60s after a crash, restarted after phone reboot.
-- The code is uploaded to Firebase by a publisher script on this PC. The phone downloads it by a 6-digit code and unpacks it. **`node_modules` is installed on the PC** (`npm ci --omit=dev --ignore-scripts`) and shipped as is. Nothing is installed on the phone.
-- stdout/stderr go to the app's "לוגים" screen. Keep logs useful and not too chatty.
-- When the user presses Stop, the process gets `SIGTERM` and is killed 5s later. Handle `SIGTERM` gracefully (close sockets, flush data).
+## Workflow
 
-### Environment variables the app sets
+**0. Already published?** If the project root has `.run-on-phone-state.json`, it was published before. Check whether anything needs fixing (steps 1–4), then publish again (step 5). The code stays the same and the version goes up.
+
+**1. Understand the project.** Language, how it starts (`package.json` scripts / main file), whether it has a web server and on which port, where it writes state (sessions, DB, files), whether it prints a QR code to the terminal, and which dependencies are native addons.
+- **Not Node.js** (Python and so on)? Stop. Tell me in Hebrew that the phone app runs only Node.js and ask whether to port it. Don't publish.
+- TypeScript is fine: build it on the PC (see `build` below).
+
+**2. Make it phone-compatible**, following the "Phone environment" rules below:
+- `PORT` / `DATA_DIR` with PC fallbacks;
+- all state under `DATA_DIR`;
+- one HTTP server on `0.0.0.0:PORT` for any UI;
+- a `/qr` page for WhatsApp bots;
+- password protection for admin pages when accessed from outside the phone;
+- graceful `SIGTERM`;
+- replace native addons with pure-JS alternatives.
+
+**3. Create `run-on-phone.json`** in the project root (format below). Add `ui` buttons only for pages that really exist. Exclude local state folders.
+
+**4. Smoke test like the phone does.** Start it with `PORT=3101 DATA_DIR=<temp dir> RUN_ON_PHONE=1 node <entry>` (PowerShell: `$env:PORT=3101; $env:DATA_DIR=...; $env:RUN_ON_PHONE=1; node <entry>`). Check that it stays up for ~15 seconds without crashing, request each `ui` path and expect HTTP 200 (or a login prompt), then stop it. For a WhatsApp bot, confirm that `/qr` shows a QR. Don't scan it, and don't keep a PC session.
+
+**5. Publish:**
+```
+node "C:\Projects\AAA\run-on-phone\publisher\publish.mjs" "<absolute path of the project root>"
+```
+- If `C:\Projects\AAA\run-on-phone\publisher\node_modules` is missing, run `npm install` in that folder first.
+- If the publisher folder doesn't exist on this machine: `git clone https://github.com/rb077858/run-on-phone C:\Projects\AAA\run-on-phone`, then run `npm install` in `publisher`.
+- If it reports that `service-account.json` is missing, stop. Tell me it's a one-time setup: download the Firebase service account key for project `run-on-phone` and save it as `C:\Projects\AAA\run-on-phone\publisher\service-account.json` (instructions in that repo's SETUP.md).
+- If it warns about native addons (`.node` files), fix them and publish again.
+- Use `--dry-run` to package without uploading.
+
+**6. Final answer, in Hebrew, short:**
+```
+✅ הקוד שלך: 123456
+באפליקציה: הוסף פרויקט ← 123456 ← הרצה
+כפתורים שיופיעו: …
+בהפעלה הראשונה: …   (e.g. "open חיבור וואטסאפ and scan the QR from WhatsApp → Linked devices")
+מה שיניתי בפרויקט: … (one or two lines)
+```
+If it was a re-publish: "הקוד נשאר <code>. בטלפון: עצור ← הרצה (העדכון יורד אוטומטית)".
+
+---
+
+## Phone environment (reference)
+
+- Runs **Node.js 24, linux/arm64 on Android**: a real `node` binary, one process per project, kept alive in the background, auto-restarted after crashes (3s→60s backoff) and after the phone reboots.
+- The publisher installs **production `node_modules` on the PC** (`npm ci --omit=dev --ignore-scripts`) and ships them. Nothing gets installed on the phone.
+- stdout/stderr appear in the app's "לוגים" screen. On Stop the process gets `SIGTERM`, then a kill after 5s.
+
+### Environment variables
 | Var | Meaning |
 |---|---|
-| `PORT` | The local HTTP port assigned to this project (e.g. 3101). Any web UI **must** listen on it. |
-| `DATA_DIR` | Persistent folder. **All state must live here**: WhatsApp/Baileys auth, databases, uploads, config written at runtime. The app folder is replaced on every update; `DATA_DIR` is kept. |
-| `APP_DIR` | Folder with the published code (read-only in spirit). Also the working directory. |
-| `RUN_ON_PHONE` | `"1"` when running on the phone. |
-| `PROJECT_CODE` | The project's 6-digit code. |
-| `TZ` | The phone's time zone. `NODE_ENV=production`. |
-Plus anything from `env` in `run-on-phone.json`.
+| `PORT` | Local HTTP port assigned to this project (e.g. 3101). Any web UI must listen on it. |
+| `DATA_DIR` | Persistent folder. **All state goes here**: Baileys auth, DBs, uploads, runtime config. The app folder is replaced on every update. |
+| `APP_DIR` | Published code folder; also the working directory. |
+| `RUN_ON_PHONE` | `"1"` on the phone. |
+| `PROJECT_CODE` | The 6-digit code. |
+| `TZ`, `NODE_ENV=production` | Set by the app. |
+Plus `env` from `run-on-phone.json`. On the PC, fall back to `process.env.PORT || 3000` and `process.env.DATA_DIR || "./data"`.
 
-The project must still run on the PC for testing. Use fallbacks such as `process.env.PORT || 3000` and `process.env.DATA_DIR || "./data"`.
-
-### Hard constraints (the phone is not a PC)
-1. **No native addons** (`.node` files). They are built for Windows and will not load. Do not use `better-sqlite3`, `sqlite3`, `bcrypt`, `canvas`, `sharp` (as a hard requirement), `node-pty` and so on. Use pure-JS or WASM alternatives:
-   - Database: built-in **`node:sqlite`** (`const { DatabaseSync } = require("node:sqlite")`, works on the phone), or JSON files in `DATA_DIR`.
-   - Hashing: `bcryptjs` or `node:crypto` (scrypt). Images: avoid, or use `jimp` (pure JS).
-   - The publisher prints a warning listing any `.node` files. Fix those before you finish.
-2. **No external programs.** There is no `npm`, `npx`, `git`, `python`, `ffmpeg`, `chromium`/puppeteer/playwright, or shell tools beyond basic Android `sh`. Do not `spawn("node", …)`. `worker_threads` is fine.
-3. **One process, one port.** If the project has several web pages (admin, sign-up, QR…), serve them all from **one** HTTP server on `PORT` under different paths. Listen on `0.0.0.0`.
-4. Memory is limited. Avoid huge in-memory caches. If needed, add `"nodeOptions": ["--max-old-space-size=256"]`.
-5. TypeScript or bundling is fine. Build on the PC via the `build` field and point `entry` at the built JS.
+### Hard constraints
+1. **No native addons** (`.node` files): no `better-sqlite3`, `sqlite3`, `bcrypt`, `canvas`, `node-pty`, and `sharp` only as optional. Instead:
+   - Database: built-in `node:sqlite` (`const { DatabaseSync } = require("node:sqlite")`, verified on the phone) or JSON files in `DATA_DIR`.
+   - Hashing: `bcryptjs` / `node:crypto` scrypt. Images: `jimp` or none.
+2. **No external programs**: no npm/npx/git/python/ffmpeg/chromium/puppeteer/playwright. Never `spawn("node", …)`. `worker_threads` is OK.
+3. **One process, one port**: serve every page (admin, sign-up, QR…) from one HTTP server on `PORT`, bound to `0.0.0.0`.
+4. Limited memory: avoid huge caches. If needed, use `"nodeOptions": ["--max-old-space-size=256"]`.
 
 ### WhatsApp bots (Baileys)
-Baileys (`baileys` 7.x / `@whiskeysockets/baileys`) is **tested and works** on the phone, including connecting and getting a QR, without `sharp`. Requirements:
-- Store auth with `useMultiFileAuthState(path.join(DATA_DIR, "auth"))`.
-- **Pairing UI**: the phone has no terminal, so do not rely on `printQRInTerminal`. Serve a page at **`/qr`** that:
-  - shows the current QR as an image (`qrcode` package → `QRCode.toDataURL(qr)`), refreshing every few seconds (QRs rotate);
-  - shows the connection status (connected as +972…, or waiting for scan);
-  - optionally offers **pairing by phone number** (`sock.requestPairingCode(number)`) with a small form;
-  - is RTL / Hebrew and mobile-friendly.
-- Add a UI button for it: `{ "label": "חיבור וואטסאפ", "path": "/qr" }`.
+Baileys 7.x (`baileys` / `@whiskeysockets/baileys`) is **verified on the phone**, connecting and producing a QR without `sharp`. Requirements:
+- Auth: `useMultiFileAuthState(path.join(DATA_DIR, "auth"))`.
+- The phone has no terminal, so `printQRInTerminal` is useless. Serve **`/qr`**: the current QR as an image (`qrcode` → `QRCode.toDataURL(qr)`) auto-refreshing every few seconds, the connection status (connected as +972… / waiting), optionally pairing by phone number (`sock.requestPairingCode(number)`), RTL Hebrew and mobile-friendly. Add the button `{ "label": "חיבור וואטסאפ", "path": "/qr" }`.
 - Reconnect on `connection === "close"` unless `DisconnectReason.loggedOut`. On logout, delete the auth folder and restart the socket so a new QR appears.
-- Don't crash on transient network errors. The phone may switch Wi-Fi/cellular.
+- Survive transient network errors (Wi-Fi/cellular switches).
 
 ### Admin / sign-up pages
-- If the project has an admin interface, sign-up page or similar, expose each as a path on the `PORT` server and list them in `ui` (they become buttons in the app that open the page inside the app).
-- These pages are reachable from the phone itself (`127.0.0.1`) and from other devices **on the same Wi-Fi** (`http://<phone-ip>:PORT`). Protect admin pages: allow requests from `127.0.0.1`/`::1` freely, and require a password (HTTP Basic or a login form) for any other address. Store the password in `DATA_DIR`, or generate it on first run and print it once to the log.
-- Make the pages mobile-friendly, RTL Hebrew.
-- If something must be reachable from the public internet, tell me first. It needs a tunnel and is a separate decision.
+- Each page is a path on the `PORT` server and listed in `ui`. They become buttons that open inside the app.
+- Reachable from the phone (`127.0.0.1`) and from the same Wi-Fi (`http://<phone-ip>:PORT`). Allow `127.0.0.1`/`::1` freely; require a password from any other address. Keep the password in `DATA_DIR`, or generate it on first run and print it once to the log.
+- Mobile-friendly, RTL Hebrew. If something must be public on the internet, ask me first (it needs a tunnel).
 
 ### Secrets
-Everything published (code, `.env` files in the folder, and `env` in the manifest) is stored in my Firebase project. Anyone holding the Firebase API key plus the 6-digit code can download it. That's acceptable for personal bots, but don't put highly sensitive keys there without telling me. Secrets that the user can enter at runtime are better saved through the admin page into `DATA_DIR`.
+The published package (including `.env` files and manifest `env`) is stored in Firebase. Anyone with the Firebase API key plus the code can download it. That's fine for personal bots, but warn me before publishing highly sensitive keys. Prefer having secrets entered at runtime through the admin page and saved in `DATA_DIR`.
 
-## The manifest: `run-on-phone.json` (in the project root)
+## `run-on-phone.json` format
 ```json
 {
   "name": "בוט וואטסאפ לדוגמה",
@@ -68,27 +102,14 @@ Everything published (code, `.env` files in the folder, and `env` in the manifes
   "env": { "SOME_SETTING": "value" },
   "ui": [
     { "label": "חיבור וואטסאפ", "path": "/qr" },
-    { "label": "ממשק ניהול", "path": "/admin" },
-    { "label": "הרשמה", "path": "/register" }
+    { "label": "ממשק ניהול", "path": "/admin" }
   ],
   "build": "npm run build",
   "include": [],
-  "exclude": ["data", ".phone-data", "auth_info"]
+  "exclude": ["data", "auth_info"]
 }
 ```
-- Required: `name`, `entry`. `ui` is optional. Add only buttons the project really supports (none at all is fine). `url` may be used instead of `path` for an external page.
-- `build`, `include` and `exclude` are used only on the PC and are not sent to the phone. `exclude` takes exact paths relative to the project root (folders or files, no wildcards). `node_modules` and `.git` are always excluded, and dependencies are reinstalled cleanly. If `include` is set, only those paths (plus `package.json`/lock) are packaged.
-- **Exclude local state** (auth folders, local DBs, logs) so the PC's WhatsApp session is not uploaded.
-
-## Publish
-1. Test locally the way the phone runs it:
-   `PORT=3101 DATA_DIR=./.phone-data RUN_ON_PHONE=1 node <entry>` (PowerShell: set `$env:PORT` and so on). Open the UI paths in a browser, and check that the QR page works.
-2. Publish:
-   ```
-   node "C:\Projects\AAA\run-on-phone\publisher\publish.mjs" "<absolute path of this project>"
-   ```
-   - The first publish creates a 6-digit code and saves it in `.run-on-phone-state.json`. Later publishes keep the same code and bump the version. Don't delete that file, but you may commit it.
-   - `--dry-run` packages without uploading. `--info` prints the code.
-   - If it says the service account is missing, tell me. Setup is in `C:\Projects\AAA\run-on-phone\SETUP.md`.
-3. **Finish by telling me in Hebrew**: the **code** in large text, which buttons will appear in the app, any first-run steps (for example "open חיבור וואטסאפ and scan the QR"), and any limitation you hit.
-4. After future changes, publish again. On the phone the new version installs automatically when the project starts (Stop → הרצה), or via ⋮ → "בדוק עדכון".
+- Required: `name`, `entry` (path relative to the root, after `build`). `ui` is optional; use `url` instead of `path` for an external page.
+- `build`, `include` and `exclude` are used only on the PC. `exclude` takes exact root-relative paths (no wildcards). `node_modules`, `.git` and `.run-on-phone-state.json` are always excluded. If `include` is set, only those paths (plus `package.json`/lock) are packaged.
+- Always exclude local state (WhatsApp auth folders, local DBs, logs) so the PC's session isn't uploaded.
+- `.run-on-phone-state.json` holds the code. Keep it (it's fine to commit), so later publishes reuse the same code.
