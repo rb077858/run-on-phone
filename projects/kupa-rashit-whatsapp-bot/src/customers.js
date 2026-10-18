@@ -64,7 +64,8 @@ async function createEpisodesGroup(c, sock) {
   await sleep(1500);
   const meta = await tryDo("metadata", () => sock.groupMetadata(jid));
   c.groupJid = jid;
-  c.groupDesc = meta?.desc ?? EPISODES_GROUP_DESC; // compare with what WhatsApp actually stored
+  // Compare later with what WhatsApp actually stored (if setting it failed, the next sync sets it).
+  c.groupDesc = meta ? meta.desc || "" : EPISODES_GROUP_DESC;
   c.sent = [];
   c.inbox = [];
   c.welcome = null;
@@ -264,7 +265,7 @@ export async function syncCustomer(c) {
       await tryDo("description", () => sock.groupUpdateDescription(c.groupJid, EPISODES_GROUP_DESC));
       await sleep(1000);
       const m2 = await tryDo("metadata", () => sock.groupMetadata(c.groupJid));
-      c.groupDesc = m2?.desc ?? EPISODES_GROUP_DESC;
+      if (m2) c.groupDesc = m2.desc || "";
       save();
     }
 
@@ -331,8 +332,10 @@ async function block(c, sock, meta, reasons) {
   addLog(`⛔ ${name}: הפרת כללים – ${reasons.join(", ")}. חוסם.`);
   const jid = c.groupJid;
 
+  // Delete everything the bot sent, so participants that were added don't keep it.
   const sent = [...(c.sent || [])];
   for (const rec of [...sent].reverse()) await deleteSent(sock, jid, rec);
+  if (c.welcome) await deleteSent(sock, jid, c.welcome);
 
   const me = selfIds(sock);
   const others = meta.participants
@@ -343,8 +346,12 @@ async function block(c, sock, meta, reasons) {
   const last = sent.at(-1);
   await leaveAndDeleteChat(sock, jid, last?.key, last?.timestamp);
 
+  // A new group with one explanation message, which the customer then leaves: the chat stays
+  // on their phone so they can read it, but they can't write in it.
   const blockJid = await createLockedGroup(sock, BLOCKED_GROUP_NAME);
   const msg = await sock.sendMessage(blockJid, { text: BLOCKED_MESSAGE });
+  await sleep(1500);
+  await tryDo("leave block group", () => sock.groupLeave(blockJid));
   Object.assign(c, {
     status: "blocked",
     blockedReason: reasons.join(", "),
@@ -352,16 +359,18 @@ async function block(c, sock, meta, reasons) {
     groupJid: null,
     groupDesc: null,
     sent: [],
+    welcome: null,
     blockGroupJid: blockJid,
     blockMsg: { key: msg.key, timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000) },
   });
   save();
-  addLog(`⛔ ${name}: נחסם. נוצרה קבוצת "${BLOCKED_GROUP_NAME}"`);
+  addLog(`⛔ ${name}: נחסם. הקבוצה נמחקה, ונשארה לו קבוצת "${BLOCKED_GROUP_NAME}" עם ההודעה, לקריאה בלבד`);
 }
 
 export async function unblockCustomer(c) {
   const name = customerName(c);
   await customerSession(c.id).use(async (sock) => {
+    // Already left when blocked; this deletes the chat (and leaves, for blocks from older versions).
     if (c.blockGroupJid) await leaveAndDeleteChat(sock, c.blockGroupJid, c.blockMsg?.key, c.blockMsg?.timestamp);
     Object.assign(c, { status: "active", blockGroupJid: null, blockMsg: null, blockedReason: null, blockedAt: null });
     await createEpisodesGroup(c, sock);
