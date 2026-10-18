@@ -1,6 +1,7 @@
 // Everything done through a customer's own WhatsApp account: creating the
 // "קופה ראשית פרקים" group, syncing episodes into it, and blocking / unblocking.
 import { jidNormalizedUser } from "baileys";
+import fs from "node:fs";
 import {
   BLOCKED_GROUP_NAME,
   BLOCKED_MESSAGE,
@@ -12,6 +13,7 @@ import {
 import { db, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
 import { addLog, enqueue } from "./jobs.js";
 import { episodeFile, formatBytes } from "./media.js";
+import { makeUploader } from "./upload.js";
 import { numberOf, session, sleep } from "./wa.js";
 
 export const customerName = (c) => `${c.firstName} ${c.lastName}`.trim();
@@ -161,15 +163,19 @@ export async function syncCustomer(c) {
       const file = await episodeFile(ep.source, (done, total) =>
         addLog(`  ⬇ ${label}: ${formatBytes(done)}${total ? ` / ${formatBytes(total)}` : ""}`),
       );
-      addLog(`${name}: שולח ${label} (${i + 1}/${missing.length})`);
+      addLog(`${name}: שולח ${label} (${i + 1}/${missing.length}, ${formatBytes(fs.statSync(file).size)})`);
       s.touch();
       const caption = episodeCaption(ep);
-      const msg = await sock.sendMessage(c.groupJid, {
-        video: { url: file },
-        caption,
-        mimetype: "video/mp4",
-        jpegThumbnail: THUMBNAIL, // also keeps Baileys from looking for ffmpeg
-      });
+      const msg = await sock.sendMessage(
+        c.groupJid,
+        {
+          video: { url: file },
+          caption,
+          mimetype: "video/mp4",
+          jpegThumbnail: THUMBNAIL, // also keeps Baileys from looking for ffmpeg
+        },
+        { upload: makeUploader(sock, addLog) },
+      );
       s.sentCache.set(msg.key.id, msg.message);
       c.sent.push({
         episodeId: ep.id,
