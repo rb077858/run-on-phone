@@ -69,9 +69,11 @@ export function makeUploader(sock, log = console.log) {
           errors.push(`${host.hostname}: ${e.message}`);
         }
       }
-      if (errors.length && errors.every((e) => e.includes("גדול מהמקסימום"))) break; // retrying won't help
+      if (errors.every((e) => /BAD_FILE_SIZE|HTTP 413|גדול מהמקסימום/.test(e))) break; // retrying won't help
       log(`  ⚠ העלאה נכשלה (ניסיון ${attempt}/3): ${errors.at(-1)}`);
     }
-    throw new Error(`העלאת הסרטון לוואטסאפ נכשלה – ${[...new Set(errors)].slice(-3).join(" | ")}`);
+    const err = new Error(`העלאת הסרטון לוואטסאפ נכשלה – ${[...new Set(errors)].slice(-3).join(" | ")}`);
+    err.tooLarge = errors.every((e) => /BAD_FILE_SIZE|HTTP 413|גדול מהמקסימום/.test(e));
+    throw err;
   };
 }

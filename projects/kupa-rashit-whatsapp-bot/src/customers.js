@@ -12,7 +12,7 @@ import {
 } from "./config.js";
 import { db, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
 import { addLog, enqueue } from "./jobs.js";
-import { episodeFile, formatBytes } from "./media.js";
+import { episodeFile, formatBytes, videoParts } from "./media.js";
 import { makeUploader } from "./upload.js";
 import { numberOf, session, sleep } from "./wa.js";
 
@@ -135,28 +135,41 @@ export async function syncCustomer(c) {
     if (reasons.length) return block(c, sock, meta, reasons);
     if (meta.ephemeralDuration) await tryDo("ephemeral off", () => sock.groupToggleEphemeral(c.groupJid, 0));
 
-    // Keep the longest prefix that is already in the right order; delete everything after
-    // it and re-send, so the group always shows the episodes in order.
+    // Keep the longest prefix of episodes that is already complete and in the right order;
+    // delete everything after it and re-send, so the group always shows them in order.
+    // An episode may be several messages (parts), see sendEpisode.
     const desired = sortedEpisodes();
     const sent = c.sent || [];
-    let keep = 0;
-    while (
-      keep < sent.length &&
-      keep < desired.length &&
-      sent[keep].episodeId === desired[keep].id &&
-      sent[keep].sourceKey === sourceKey(desired[keep].source) &&
-      sent[keep].caption === episodeCaption(desired[keep])
-    ) keep++;
+    const groups = [];
+    for (const rec of sent) {
+      const last = groups.at(-1);
+      if (last && (rec.part || 1) > 1 && last[0].episodeId === rec.episodeId) last.push(rec);
+      else groups.push([rec]);
+    }
+    let keepEpisodes = 0;
+    let keepMessages = 0;
+    for (const g of groups) {
+      const ep = desired[keepEpisodes];
+      const ok =
+        ep &&
+        g[0].episodeId === ep.id &&
+        g[0].sourceKey === sourceKey(ep.source) &&
+        g[0].caption === episodeCaption(ep) &&
+        g.length === (g[0].parts || 1);
+      if (!ok) break;
+      keepEpisodes++;
+      keepMessages += g.length;
+    }
 
-    const toDelete = sent.slice(keep);
-    if (toDelete.length) addLog(`${name}: מוחק ${toDelete.length} הודעות כדי לסדר מחדש`);
-    for (const rec of toDelete.reverse()) {
-      await deleteSent(sock, c.groupJid, rec);
+    const toDelete = sent.length - keepMessages;
+    if (toDelete) addLog(`${name}: מוחק ${toDelete} הודעות כדי לסדר מחדש`);
+    while (c.sent.length > keepMessages) {
+      await deleteSent(sock, c.groupJid, c.sent.at(-1));
       c.sent.pop();
       save();
     }
 
-    const missing = desired.slice(keep);
+    const missing = desired.slice(keepEpisodes);
     if (!missing.length) addLog(`✔ ${name}: מעודכן (${desired.length} פרקים)`);
     for (const [i, ep] of missing.entries()) {
       const label = `עונה ${ep.season} פרק ${ep.episode}`;
@@ -164,32 +177,80 @@ export async function syncCustomer(c) {
         addLog(`  ⬇ ${label}: ${formatBytes(done)}${total ? ` / ${formatBytes(total)}` : ""}`),
       );
       addLog(`${name}: שולח ${label} (${i + 1}/${missing.length}, ${formatBytes(fs.statSync(file).size)})`);
-      s.touch();
-      const caption = episodeCaption(ep);
-      const msg = await sock.sendMessage(
-        c.groupJid,
-        {
-          video: { url: file },
-          caption,
-          mimetype: "video/mp4",
-          jpegThumbnail: THUMBNAIL, // also keeps Baileys from looking for ffmpeg
-        },
-        { upload: makeUploader(sock, addLog) },
-      );
-      s.sentCache.set(msg.key.id, msg.message);
-      c.sent.push({
-        episodeId: ep.id,
-        sourceKey: sourceKey(ep.source),
-        caption,
-        key: msg.key,
-        timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000),
-      });
-      save();
+      await sendEpisode(c, s, sock, ep, file);
     }
     c.lastSync = Date.now();
     save();
     if (missing.length) addLog(`✔ ${name}: הסתיים, ${desired.length} פרקים בקבוצה`);
   });
+}
+
+// WhatsApp rejects videos above some size (HTTP 413). Big episodes are split into parts
+// of these sizes, trying the largest first; the size that worked is remembered.
+const PART_SIZES = [95e6, 63e6, 31e6, 15e6];
+
+async function sendEpisode(c, s, sock, ep, file) {
+  const size = fs.statSync(file).size;
+  const settings = (db().settings ??= {});
+  const known = settings.maxVideoBytes;
+  const limits = [
+    ...(known && size > known ? [] : [null]), // null = the whole file
+    ...PART_SIZES.filter((l) => l < size && (!known || l <= known)),
+  ];
+  const caption = episodeCaption(ep);
+  const firstIndex = c.sent.length;
+  for (const limit of limits) {
+    let parts;
+    try {
+      parts = limit ? videoParts(file, limit) : [file];
+    } catch (e) {
+      throw new Error(`חלוקת הסרטון לחלקים נכשלה: ${e.message}`);
+    }
+    if (parts.length > 1) addLog(`  ✂ מחלק ל-${parts.length} חלקים (עד ${formatBytes(limit)} כל אחד)`);
+    try {
+      for (const [i, part] of parts.entries()) {
+        s.touch();
+        const partCaption = parts.length > 1 ? `${caption}\n🧩 חלק ${i + 1} מתוך ${parts.length}` : caption;
+        if (parts.length > 1) addLog(`  שולח חלק ${i + 1}/${parts.length} (${formatBytes(fs.statSync(part).size)})`);
+        const msg = await sock.sendMessage(
+          c.groupJid,
+          {
+            video: { url: part },
+            caption: partCaption,
+            mimetype: "video/mp4",
+            jpegThumbnail: THUMBNAIL, // also keeps Baileys from looking for ffmpeg
+          },
+          { upload: makeUploader(sock, addLog) },
+        );
+        s.sentCache.set(msg.key.id, msg.message);
+        c.sent.push({
+          episodeId: ep.id,
+          sourceKey: sourceKey(ep.source),
+          caption,
+          part: i + 1,
+          parts: parts.length,
+          key: msg.key,
+          timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000),
+        });
+        save();
+      }
+      if (limit && settings.maxVideoBytes !== limit) {
+        settings.maxVideoBytes = limit;
+        save();
+      }
+      return;
+    } catch (e) {
+      if (!e.tooLarge) throw e;
+      addLog(`  ⚠ וואטסאפ לא מקבל קובץ בגודל הזה, מנסה חלקים קטנים יותר`);
+      // Remove parts of this episode that were already sent at the bigger size.
+      while (c.sent.length > firstIndex) {
+        await deleteSent(sock, c.groupJid, c.sent.at(-1));
+        c.sent.pop();
+        save();
+      }
+    }
+  }
+  throw new Error("וואטסאפ לא מקבל את הסרטון גם אחרי חלוקה לחלקים קטנים");
 }
 
 // ------------------------------------------------------------ block/unblock

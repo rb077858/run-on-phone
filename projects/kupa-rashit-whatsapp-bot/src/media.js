@@ -2,12 +2,14 @@
 // the manager group, and from admin-panel uploads. Everything is streamed to disk, never
 // held in memory.
 import { downloadContentFromMessage } from "baileys";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { CACHE_DIR, MEDIA_DIR } from "./config.js";
 import { newId } from "./db.js";
+import { splitMp4 } from "./mp4split.js";
 
 // ---------------------------------------------------------------- Drive links
 const DRIVE_HOST = /(drive|docs)\.google\.com|drive\.usercontent\.google\.com/;
@@ -115,6 +117,26 @@ export async function saveUpload(req) {
   const file = `up-${newId()}.mp4`;
   await streamToFile(req, path.join(MEDIA_DIR, file), Number(req.headers["content-length"]) || 0);
   return file;
+}
+
+// -------------------------------------------------------------------- parts
+/**
+ * The video split into parts of at most maxBytes (cached in CACHE_DIR, so every customer
+ * reuses the same parts). Returns [file] if it already fits.
+ */
+export function videoParts(file, maxBytes) {
+  const st = fs.statSync(file);
+  if (st.size <= maxBytes) return [file];
+  const id = crypto.createHash("sha1").update(`${file}|${st.size}|${st.mtimeMs}`).digest("hex").slice(0, 12);
+  const prefix = path.join(CACHE_DIR, `split-${id}-${Math.round(maxBytes / 1e6)}MB`);
+  const index = `${prefix}.json`;
+  try {
+    const parts = JSON.parse(fs.readFileSync(index, "utf8"));
+    if (parts.every((p) => fs.existsSync(p))) return parts;
+  } catch {}
+  const parts = splitMp4(file, prefix, maxBytes);
+  fs.writeFileSync(index, JSON.stringify(parts));
+  return parts;
 }
 
 // ------------------------------------------------------------------- sources
