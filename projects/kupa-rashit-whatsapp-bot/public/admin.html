@@ -127,7 +127,13 @@
   .menu-item:first-of-type { border-top: 0; }
   .menu-item.red { color: var(--bad); }
   .qr { background: #fff; border-radius: 16px; padding: 10px; width: 260px; max-width: 80vw; display: block; margin: 0 auto; }
-  .pair { font: 800 30px/1.2 ui-monospace, monospace; letter-spacing: 4px; color: var(--gold); direction: ltr; text-align: center; margin: 10px 0; }
+  .pair-card { text-align: center; border-color: #f7c54866; background: linear-gradient(180deg, #2a2240, var(--card)); }
+  .pair-title { font-weight: 800; font-size: 17px; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; justify-content: center; }
+  .btn.big { font-size: 17px; padding: 16px; }
+  .or { text-align: center; color: var(--muted); font-size: 13px; margin: 14px 0 10px; display: flex; align-items: center; gap: 10px; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .steps { text-align: right; }
+  .pair { font: 800 34px/1.2 ui-monospace, monospace; letter-spacing: 4px; color: var(--gold); direction: ltr; text-align: center; margin: 10px 0; user-select: all; }
   .steps { margin: 10px 0; padding-right: 18px; color: var(--muted); font-size: 14px; }
   progress { width: 100%; height: 8px; accent-color: var(--gold); }
   .pick-list { max-height: 50vh; overflow: auto; }
@@ -402,13 +408,20 @@ function connectSheet(id) {
       box.innerHTML = `<div class="empty" style="padding:20px"><div class="big">✅</div><b>מחובר!</b><p>הקבוצה "קופה ראשית פרקים" נוצרה אצל הלקוח. עכשיו אפשר לסנכרן.</p></div>${err}`;
       if (!done) { done = true; load(); }
     } else if (s.state === 'qr') {
-      box.innerHTML = `<img class="qr" src="${s.qr}" alt="QR">
-        <ol class="steps"><li>בטלפון של הלקוח: וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</li><li>סורקים את הקוד</li></ol>
-        <div class="card" style="text-align:center"><b>או בלי לסרוק: קוד צימוד</b>
-          <div class="muted small">ב"קישור מכשיר" בוחרים "קישור עם מספר טלפון", ומזינים:</div>
-          <div class="pair">${s.pairingCode ? esc(s.pairingCode) : '— — — —'}</div>
-          <button class="btn sm" data-act="pair" data-id="${id}">${s.pairingCode ? 'קוד חדש' : `קבלת קוד ל-<span class="ltr">+${esc(s.phone)}</span>`}</button>
-        </div>${err}`;
+      const code = s.pairingCode;
+      box.innerHTML = `<div class="card pair-card">
+          <div class="pair-title">🔢 חיבור עם קוד <span class="chip gold">הכי נוח</span></div>
+          ${code
+            ? `<div class="pair">${esc(code)}</div>
+               <button class="btn gold block" data-act="copyCode" data-code="${esc(code)}">📋 העתקת הקוד</button>
+               <button class="btn ghost sm" style="margin-top:8px" data-act="pair" data-id="${id}">🔄 קוד חדש</button>`
+            : `<button class="btn gold block big" data-act="pair" data-id="${id}">קבלת קוד חיבור ל-<span class="ltr">+${esc(s.phone)}</span></button>`}
+          <ol class="steps"><li>בטלפון של הלקוח: וואטסאפ ← ⋮ / הגדרות ← <b>מכשירים מקושרים</b> ← <b>קישור מכשיר</b></li>
+            <li>בוחרים למטה <b>"קישור עם מספר טלפון במקום זאת"</b></li><li>מזינים את הקוד (תקף כמה דקות)</li></ol>
+        </div>
+        <div class="or">או סריקת QR</div>
+        <img class="qr" src="${s.qr}" alt="QR">
+        <div class="muted small" style="text-align:center;margin-top:6px">מכשירים מקושרים ← קישור מכשיר ← סורקים</div>${err}`;
     } else {
       box.innerHTML = `<div class="muted">⏳ ${s.linked ? 'מתחבר…' : 'מכין קוד…'}</div>${err}`;
     }
@@ -510,6 +523,14 @@ function upload(file, d, e, mode, replace = false) {
   });
 }
 
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try { // older WebViews
+    const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select(); const ok = document.execCommand('copy'); t.remove(); return ok;
+  } catch { return false; }
+}
+
 // ---------------------------------------------------------------- actions
 const actions = {
   syncAll: () => run(api('POST', '/api/sync-all'), (r) => r.count ? `🔄 סנכרון של ${r.count} לקוחות התחיל` : 'אין לקוחות מחוברים'),
@@ -517,6 +538,7 @@ const actions = {
   unblock: (b) => confirm('לבטל את החסימה? קבוצת החסימה תימחק, תיווצר קבוצת פרקים חדשה, וכל הפרקים יישלחו.') && run(api('POST', `/api/customers/${b.dataset.id}/unblock`), 'ביטול החסימה התחיל'),
   connect: (b) => connectSheet(b.dataset.id),
   pair: (b) => run(api('POST', `/api/customers/${b.dataset.id}/wa/pair`), 'מבקש קוד…'),
+  copyCode: (b) => copyText(b.dataset.code.replace(/[^0-9A-Za-z]/g, '')).then((ok) => toast(ok ? '📋 הקוד הועתק' : 'לא הצלחתי להעתיק. סמן את הקוד והעתק ידנית', !ok)),
   custMenu: (b) => custMenu(b.dataset.id),
   editCust: (b) => customerForm(custById(b.dataset.id)),
   resendPick: (b) => resendPick(b.dataset.id),

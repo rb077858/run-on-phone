@@ -134,11 +134,21 @@ async function deleteSent(sock, jid, rec) {
   );
 }
 
+/** Leaves the group and deletes the chat from the customer's WhatsApp. Returns false if the chat stayed. */
 async function leaveAndDeleteChat(sock, jid, lastKey, lastTimestamp) {
   await tryDo("leave", () => sock.groupLeave(jid));
   await sleep(1000);
   const lastMessages = lastKey ? [{ key: lastKey, messageTimestamp: lastTimestamp }] : [];
-  await tryDo("delete chat", () => sock.chatModify({ delete: true, lastMessages }, jid));
+  try {
+    await sock.chatModify({ delete: true, lastMessages }, jid);
+    return true;
+  } catch (e) {
+    console.warn(`delete chat failed: ${e.message}`);
+    // Fallback: at least empty it and hide it in the archive.
+    await tryDo("clear chat", () => sock.chatModify({ clear: true, lastMessages }, jid));
+    await tryDo("archive chat", () => sock.chatModify({ archive: true, lastMessages }, jid));
+    return false;
+  }
 }
 
 // ------------------------------------------------------------------ inbox
@@ -332,19 +342,24 @@ async function block(c, sock, meta, reasons) {
   addLog(`⛔ ${name}: הפרת כללים – ${reasons.join(", ")}. חוסם.`);
   const jid = c.groupJid;
 
-  // Delete everything the bot sent, so participants that were added don't keep it.
-  const sent = [...(c.sent || [])];
-  for (const rec of [...sent].reverse()) await deleteSent(sock, jid, rec);
-  if (c.welcome) await deleteSent(sock, jid, c.welcome);
-
   const me = selfIds(sock);
   const others = meta.participants
     .filter((p) => ![p.id, p.phoneNumber, p.lid].some((x) => x && me.has(jidNormalizedUser(x))))
     .map((p) => p.id);
-  if (others.length) await tryDo("remove participants", () => sock.groupParticipantsUpdate(jid, others, "remove"));
+  const sent = [...(c.sent || [])];
+  if (others.length) {
+    // People were added: first delete the videos "for everyone" while they are still in the
+    // group (a delete doesn't reach someone who was already removed), then remove them all.
+    addLog(`  מוחק ${sent.length} סרטונים ומוציא ${others.length} משתתפים`);
+    for (const rec of [...sent].reverse()) await deleteSent(sock, jid, rec);
+    if (c.welcome) await deleteSent(sock, jid, c.welcome);
+    await tryDo("remove participants", () => sock.groupParticipantsUpdate(jid, others, "remove"));
+  }
   await tryDo("revoke invite", () => sock.groupRevokeInvite(jid));
-  const last = sent.at(-1);
-  await leaveAndDeleteChat(sock, jid, last?.key, last?.timestamp);
+  // With everyone out, leaving empties the group; then the chat is deleted from the customer's WhatsApp.
+  const last = sent.at(-1) || c.welcome;
+  const deleted = await leaveAndDeleteChat(sock, jid, last?.key, last?.timestamp);
+  if (!deleted) addLog("  ⚠ וואטסאפ לא אישרה את מחיקת הצ'אט. הקבוצה רוקנה והועברה לארכיון אצל הלקוח");
 
   // A new group with one explanation message, which the customer then leaves: the chat stays
   // on their phone so they can read it, but they can't write in it.
