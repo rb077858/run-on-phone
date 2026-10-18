@@ -3,6 +3,11 @@
 const queue = [];
 let current = null;
 const log = [];
+let progress = null; // one live line (download/upload progress) instead of flooding the log
+
+export function setProgress(text) {
+  progress = text;
+}
 
 export function addLog(line) {
   const entry = `${new Date().toLocaleTimeString("he-IL", { hour12: false })}  ${line}`;
@@ -31,12 +36,14 @@ async function run() {
       console.error(e);
     }
     current = null;
+    progress = null;
   }
 }
 
 export const jobsStatus = () => ({
   current: current?.label ?? null,
   queued: queue.map((j) => j.label),
+  progress,
   log: log.slice(-120),
 });
 

@@ -9,7 +9,7 @@ import { generateWAMessageFromContent, getUrlFromDirectPath, proto } from "baile
 import fs from "node:fs";
 import { THUMBNAIL, episodeCaption } from "./config.js";
 import { save, settings, sourceKey } from "./db.js";
-import { addLog } from "./jobs.js";
+import { addLog, setProgress } from "./jobs.js";
 import { episodeFile, formatBytes, videoParts } from "./media.js";
 import { makeUploader } from "./upload.js";
 
@@ -60,20 +60,22 @@ async function relay(sock, jid, ref, caption) {
   return msg;
 }
 
-async function upload(sock, jid, file, caption) {
+async function upload(sock, jid, file, caption, name) {
   return sock.sendMessage(
     jid,
     { video: { url: file }, caption, mimetype: "video/mp4", jpegThumbnail: THUMBNAIL }, // thumbnail: no ffmpeg needed
-    { upload: makeUploader(sock, addLog) },
+    { upload: makeUploader(sock, { log: addLog, progress: setProgress, name }) },
   );
 }
 
 // ----------------------------------------------------------------- files
 async function sourceFile(ep) {
   ep.lastUsed = Date.now();
-  return episodeFile(ep.source, (done, total) =>
-    addLog(`  ⬇ ${label(ep)}: ${formatBytes(done)}${total ? ` / ${formatBytes(total)}` : ""}`),
+  const file = await episodeFile(ep.source, (done, total) =>
+    setProgress(`⬇ ${label(ep)} מדרייב: ${total ? `${Math.floor((done / total) * 100)}% · ` : ""}${formatBytes(done)}${total ? `/${formatBytes(total)}` : ""}`),
   );
+  setProgress(null);
+  return file;
 }
 
 function partFiles(ep, file, limit) {
@@ -83,7 +85,7 @@ function partFiles(ep, file, limit) {
   } catch (e) {
     throw new Error(`חלוקת הסרטון לחלקים נכשלה: ${e.message}`);
   }
-  ep.localFiles = [...new Set([...(ep.localFiles || []), ...parts.filter((p) => p !== file)])];
+  ep.localFiles = parts.filter((p) => p !== file);
   return parts;
 }
 
@@ -105,10 +107,12 @@ export async function sendParts(c, s, sock, ep, partNumbers, onSent) {
       addLog(`  ♻ ${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""}: נשלח בלי העלאה (כבר בוואטסאפ)`);
       msg = await relay(sock, c.groupJid, part.ref, caption);
     } else {
-      parts ??= partFiles(ep, await sourceFile(ep), plan.limit);
+      // Parts already on the phone are enough; otherwise split the full video again.
+      const have = ep.localFiles?.length === n && ep.localFiles.every((p) => fs.existsSync(p));
+      parts ??= have ? ep.localFiles : partFiles(ep, await sourceFile(ep), plan.limit);
       if (parts.length !== n) throw new Error("חלוקת הפרק לחלקים השתנתה. מחק את הפרק והוסף אותו שוב");
       addLog(`  ⬆ ${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""} (${formatBytes(fs.statSync(parts[no - 1]).size)})`);
-      msg = await upload(sock, c.groupJid, parts[no - 1], caption);
+      msg = await upload(sock, c.groupJid, parts[no - 1], caption, `${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""}`);
       part.ref = refOf(msg);
       part.refAt = Date.now();
       aliveCache.delete(part.ref);
@@ -153,7 +157,8 @@ export async function firstUpload(c, s, sock, ep, onSent, undo) {
       for (const [i, part] of parts.entries()) {
         s.touch();
         addLog(`  ⬆ ${label(ep)}${parts.length > 1 ? ` חלק ${i + 1}/${parts.length}` : ""} (${formatBytes(fs.statSync(part).size)})`);
-        const msg = await upload(sock, c.groupJid, part, episodeCaption(ep, i + 1, parts.length));
+        const name = `${label(ep)}${parts.length > 1 ? ` חלק ${i + 1}/${parts.length}` : ""}`;
+        const msg = await upload(sock, c.groupJid, part, episodeCaption(ep, i + 1, parts.length), name);
         s.sentCache.set(msg.key.id, msg.message);
         const rec = record(ep, i + 1, parts.length, msg);
         sent.push(rec);
@@ -167,6 +172,8 @@ export async function firstUpload(c, s, sock, ep, onSent, undo) {
       continue;
     }
     ep.media = { key: sourceKey(ep.source), limit, parts: refs };
+    // A split Drive video: keep only the parts (the original can be downloaded again).
+    if (parts.length > 1 && ep.source.type === "drive") fs.rmSync(file, { force: true });
     if (limit && st.maxVideoBytes !== limit) st.maxVideoBytes = limit;
     ep.lastUsed = Date.now();
     save();

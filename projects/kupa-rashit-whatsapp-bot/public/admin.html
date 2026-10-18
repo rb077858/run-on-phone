@@ -323,7 +323,7 @@ function renderTop() {
   $('stDisk').textContent = fmt(disk);
   const j = state.jobs;
   $('jobNow').innerHTML = j.current ? `<span class="spin"></span>${esc(j.current)}${j.queued.length ? ` <span class="muted small">(+${j.queued.length} בתור)</span>` : ''}` : '✅ מוכן';
-  $('jobLast').textContent = j.current ? (j.log.at(-1) || '').replace(/^\S+\s+/, '') : 'כשמסיימים לסנכרן אפשר לעצור את הבוט מהאפליקציה';
+  $('jobLast').textContent = j.current ? j.progress || (j.log.at(-1) || '').replace(/^\S+\s+/, '') : 'כשמסיימים לסנכרן אפשר לעצור את הבוט מהאפליקציה';
   const reqs = state.customers.reduce((s, c) => s + c.requests, 0);
   $('reqDot').hidden = !reqs; $('reqDot').textContent = reqs;
   const log = $('log');
