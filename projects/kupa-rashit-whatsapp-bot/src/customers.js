@@ -157,6 +157,8 @@ async function leaveAndDeleteChat(sock, jid, lastKey, lastTimestamp) {
 // They are requests to resend a video, and are deleted so the group holds only videos.
 const IGNORED_TYPES = new Set([
   "videoMessage",
+  "documentMessage",
+  "documentWithCaptionMessage",
   "protocolMessage",
   "reactionMessage",
   "senderKeyDistributionMessage",
@@ -317,14 +319,18 @@ export async function syncCustomer(c) {
       const total = plan ? plan.parts.length : recs[0]?.parts || 1;
       const have = new Set(recs.map((r) => r.part || 1));
       const missing = Array.from({ length: total }, (_, i) => i + 1).filter((p) => !have.has(p));
-      if (!missing.length) continue;
+      // Uploaded before, but the other way (parts vs. whole file) and the setting changed.
+      const redo = !plan && ep.media?.key === sourceKey(ep.source);
+      if (!missing.length && !redo) continue;
       sentEpisodes++;
       if (plan) {
         await sendParts(c, s, sock, ep, missing, onSent);
       } else {
-        // Never uploaded with the current video: remove partial leftovers, upload fresh.
-        await undo(recs);
+        // Not uploaded this way yet: upload fresh, then remove what was there before (old
+        // parts, or leftovers of an interrupted send) – in this order, so nothing is lost if
+        // the upload fails.
         await firstUpload(c, s, sock, ep, onSent, undo);
+        await undo(recs);
       }
     }
     c.lastSync = Date.now();

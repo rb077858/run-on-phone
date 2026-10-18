@@ -92,6 +92,7 @@ function episodeView(ep) {
     title: ep.title || "",
     type: ep.source.type,
     parts: plan?.parts.length || null,
+    wholeFile: plan?.kind === "document",
     uploaded: !!plan?.parts.every((p) => p.ref),
     onPhone: !!localSourcePath(ep.source) || !!ep.localFiles?.length,
     localBytes: episodeLocalBytes(ep),
@@ -141,6 +142,7 @@ route("PUT", /^\/api\/settings$/, async (req) => {
     st.keepDays = d;
   }
   if (b.reuseUploads != null) st.reuseUploads = !!b.reuseUploads;
+  if (b.bigAs === "document" || b.bigAs === "parts") st.bigAs = b.bigAs;
   if (b.resetMaxVideo) st.maxVideoBytes = null;
   save();
   return st;

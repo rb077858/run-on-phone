@@ -7,7 +7,7 @@ import { DB_FILE } from "./config.js";
 const empty = () => ({
   settings: {},
   // { id, season, episode, title, source: { type: "file", file } (or "drive" from older versions),
-  //   media: { key, limit, parts: [{ size, ref, refAt }] }  ← how it was uploaded to WhatsApp
+  //   media: { key, kind: "video"|"document", limit, parts: [{ size, ref, refAt }] }  ← how it was uploaded
   //   lastUsed, localFiles, addedAt }
   episodes: [],
   // { id, firstName, lastName, phone, status: "new"|"active"|"blocked", groupJid, groupDesc,
@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS = {
   keepDays: 3, // delete episode videos from the phone this many days after they were last used
   reuseUploads: true, // upload each video to WhatsApp once and reuse it for all customers
   maxVideoBytes: null, // learned: the part size WhatsApp accepted
+  bigAs: "document", // an episode too big for a video: "document" (one whole MP4 file) or "parts"
 };
 
 let data = empty();

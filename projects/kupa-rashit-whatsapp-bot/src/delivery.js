@@ -1,4 +1,5 @@
-// Sending one episode (one or more video parts) into a customer's group.
+// Sending one episode into a customer's group: one video, one whole MP4 file (a WhatsApp
+// "document", for episodes too big for a video), or several video parts.
 //
 // Every video is uploaded to WhatsApp's media servers (encrypted). The message that points
 // to it ("ref": url, directPath, mediaKey, hashes…) is saved on the episode, so the same
@@ -10,25 +11,46 @@ import fs from "node:fs";
 import { THUMBNAIL, episodeCaption } from "./config.js";
 import { save, settings, sourceKey } from "./db.js";
 import { addLog, setProgress } from "./jobs.js";
-import { episodeFile, formatBytes, videoParts } from "./media.js";
+import { episodeFile, formatBytes, localSourcePath, videoParts } from "./media.js";
 import { makeUploader } from "./upload.js";
 
-// WhatsApp rejects videos above some size (HTTP 413). Big episodes are split into parts
-// of these sizes, trying the largest first; the size that worked is remembered.
+// WhatsApp rejects videos above some size (HTTP 413). A too-big episode is sent as one
+// whole MP4 file (documents may be much bigger), or – if that is off or also rejected –
+// split into video parts of these sizes, largest first; the size that worked is remembered.
 const PART_SIZES = [95e6, 63e6, 31e6, 15e6];
 
 const label = (ep) => `עונה ${ep.season} פרק ${ep.episode}`;
+const fileNameOf = (ep, part, parts) =>
+  `קופה ראשית - עונה ${ep.season} פרק ${ep.episode}${parts > 1 ? ` חלק ${part}` : ""}.mp4`;
 
-/** The upload plan of the episode for its current video, or null if never uploaded. */
-export const mediaPlan = (ep) => (ep.media?.key === sourceKey(ep.source) ? ep.media : null);
+/** How a too-big episode is sent right now: "document" (whole file) or "video" (parts). */
+const bigKind = (ep) => (settings().bigAs === "parts" || ep.docTooBig ? "video" : "document");
+
+/**
+ * The upload plan of the episode for its current video, or null if it must be uploaded
+ * (again). A big episode sent the "other" way (parts vs. whole file) is redone when the
+ * setting changes, but only while its video is still on the phone.
+ */
+export function mediaPlan(ep) {
+  const plan = ep.media?.key === sourceKey(ep.source) ? ep.media : null;
+  if (!plan) return null;
+  const kind = plan.kind || "video";
+  const big = kind === "document" || plan.parts.length > 1;
+  if (big && kind !== bigKind(ep) && localSourcePath(ep.source)) return null;
+  return plan;
+}
 
 // ------------------------------------------------------------------ refs
-function refOf(msg) {
-  const vm = proto.Message.VideoMessage.fromObject(msg.message.videoMessage);
-  vm.caption = "";
-  vm.contextInfo = null;
-  return Buffer.from(proto.Message.VideoMessage.encode(vm).finish()).toString("base64");
+const PROTO = { video: proto.Message.VideoMessage, document: proto.Message.DocumentMessage };
+
+function refOf(msg, kind) {
+  const m = PROTO[kind].fromObject(msg.message[`${kind}Message`]);
+  m.caption = "";
+  m.contextInfo = null;
+  return Buffer.from(PROTO[kind].encode(m).finish()).toString("base64");
 }
+
+const decodeRef = (ref, kind = "video") => PROTO[kind].decode(Buffer.from(ref, "base64"));
 
 const aliveCache = new Map(); // ref → { ok, at }, so a sync of many customers checks each video once
 
@@ -36,12 +58,12 @@ const aliveCache = new Map(); // ref → { ok, at }, so a sync of many customers
 export const forgetRefChecks = () => aliveCache.clear();
 
 /** Is the uploaded file still on WhatsApp's servers? (fetches 1 byte) */
-async function refAlive(ref) {
+async function refAlive(ref, kind) {
   const cached = aliveCache.get(ref);
   if (cached && Date.now() - cached.at < 2 * 60_000) return cached.ok;
   let ok = false;
   try {
-    const vm = proto.Message.VideoMessage.decode(Buffer.from(ref, "base64"));
+    const vm = decodeRef(ref, kind);
     const url = vm.directPath ? getUrlFromDirectPath(vm.directPath) : vm.url;
     const res = await fetch(url, { headers: { Range: "bytes=0-0", Origin: "https://web.whatsapp.com" } });
     ok = res.status === 200 || res.status === 206;
@@ -51,19 +73,22 @@ async function refAlive(ref) {
   return ok;
 }
 
-/** Sends an already-uploaded video again (no upload). */
-async function relay(sock, jid, ref, caption) {
-  const vm = proto.Message.VideoMessage.decode(Buffer.from(ref, "base64"));
-  vm.caption = caption;
-  const msg = generateWAMessageFromContent(jid, { videoMessage: vm }, { userJid: sock.user.id });
+/** Sends an already-uploaded video/file again (no upload). */
+async function relay(sock, jid, ref, kind, caption) {
+  const m = decodeRef(ref, kind);
+  m.caption = caption;
+  const msg = generateWAMessageFromContent(jid, { [`${kind}Message`]: m }, { userJid: sock.user.id });
   await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
   return msg;
 }
 
-async function upload(sock, jid, file, caption, name) {
+async function upload(sock, jid, file, kind, caption, name, fileName) {
+  const media = { url: file };
   return sock.sendMessage(
     jid,
-    { video: { url: file }, caption, mimetype: "video/mp4", jpegThumbnail: THUMBNAIL }, // thumbnail: no ffmpeg needed
+    kind === "document"
+      ? { document: media, mimetype: "video/mp4", fileName, caption, jpegThumbnail: THUMBNAIL }
+      : { video: media, mimetype: "video/mp4", caption, jpegThumbnail: THUMBNAIL }, // thumbnail: no ffmpeg needed
     { upload: makeUploader(sock, { log: addLog, progress: setProgress, name }) },
   );
 }
@@ -93,23 +118,25 @@ function partFiles(ep, file, limit) {
 export async function sendParts(c, s, sock, ep, partNumbers, onSent) {
   const plan = mediaPlan(ep);
   const n = plan.parts.length;
+  const kind = plan.kind || "video";
   let parts = null; // local files, prepared only if something must be uploaded
   for (const no of partNumbers) {
     const part = plan.parts[no - 1];
     const caption = episodeCaption(ep, no, n);
     s.touch();
     let msg;
-    if (settings().reuseUploads && part.ref && (await refAlive(part.ref))) {
+    if (settings().reuseUploads && part.ref && (await refAlive(part.ref, kind))) {
       addLog(`  ♻ ${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""}: נשלח בלי העלאה (כבר בוואטסאפ)`);
-      msg = await relay(sock, c.groupJid, part.ref, caption);
+      msg = await relay(sock, c.groupJid, part.ref, kind, caption);
     } else {
       // Parts already on the phone are enough; otherwise split the full video again.
       const have = ep.localFiles?.length === n && ep.localFiles.every((p) => fs.existsSync(p));
       parts ??= have ? ep.localFiles : partFiles(ep, await sourceFile(ep), plan.limit);
       if (parts.length !== n) throw new Error("חלוקת הפרק לחלקים השתנתה. מחק את הפרק והוסף אותו שוב");
       addLog(`  ⬆ ${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""} (${formatBytes(fs.statSync(parts[no - 1]).size)})`);
-      msg = await upload(sock, c.groupJid, parts[no - 1], caption, `${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""}`);
-      part.ref = refOf(msg);
+      const name = `${label(ep)}${n > 1 ? ` חלק ${no}/${n}` : ""}`;
+      msg = await upload(sock, c.groupJid, parts[no - 1], kind, caption, name, fileNameOf(ep, no, n));
+      part.ref = refOf(msg, kind);
       part.refAt = Date.now();
       aliveCache.delete(part.ref);
       ep.lastUsed = Date.now();
@@ -134,44 +161,58 @@ function record(ep, part, parts, msg) {
 }
 
 /**
- * First upload of an episode (no plan yet): tries the whole file, and if WhatsApp says it
- * is too large, smaller and smaller parts. Saves the plan with the refs for reuse.
- * `undo(records)` deletes messages already sent in a failed attempt.
+ * First upload of an episode (no plan yet). Tries, in order: one video; one whole file
+ * (if the episode is too big for a video); video parts of decreasing size. Saves the plan
+ * with the refs for reuse. `undo(records)` deletes messages sent in a failed attempt.
  */
 export async function firstUpload(c, s, sock, ep, onSent, undo) {
   const file = await sourceFile(ep);
   const size = fs.statSync(file).size;
   const st = settings();
   const known = st.maxVideoBytes;
-  const limits = [...(known && size > known ? [] : [null]), ...PART_SIZES.filter((l) => l < size && (!known || l <= known))];
-  for (const limit of limits) {
+  // A whole video this big was already rejected once: don't try again.
+  const fitsVideo = (!known || size <= known) && !(st.videoRejectedAt && size >= st.videoRejectedAt);
+  const attempts = [
+    ...(fitsVideo ? [{ kind: "video", limit: null }] : []),
+    ...(bigKind(ep) === "document" ? [{ kind: "document", limit: null }] : []),
+    ...PART_SIZES.filter((l) => l < size && (!known || l <= known)).map((limit) => ({ kind: "video", limit })),
+  ];
+  for (const { kind, limit } of attempts) {
     const parts = partFiles(ep, file, limit);
     if (parts.length > 1) addLog(`  ✂ ${label(ep)}: מחולק ל-${parts.length} חלקים`);
+    if (kind === "document") addLog(`  📄 ${label(ep)}: גדול מדי לסרטון, נשלח כקובץ MP4 שלם`);
     const sent = [];
     const refs = [];
     try {
       for (const [i, part] of parts.entries()) {
         s.touch();
-        addLog(`  ⬆ ${label(ep)}${parts.length > 1 ? ` חלק ${i + 1}/${parts.length}` : ""} (${formatBytes(fs.statSync(part).size)})`);
         const name = `${label(ep)}${parts.length > 1 ? ` חלק ${i + 1}/${parts.length}` : ""}`;
-        const msg = await upload(sock, c.groupJid, part, episodeCaption(ep, i + 1, parts.length), name);
+        addLog(`  ⬆ ${name} (${formatBytes(fs.statSync(part).size)})`);
+        const caption = episodeCaption(ep, i + 1, parts.length);
+        const msg = await upload(sock, c.groupJid, part, kind, caption, name, fileNameOf(ep, i + 1, parts.length));
         s.sentCache.set(msg.key.id, msg.message);
         const rec = record(ep, i + 1, parts.length, msg);
         sent.push(rec);
         onSent(rec);
-        refs.push({ size: fs.statSync(part).size, ref: refOf(msg), refAt: Date.now() });
+        refs.push({ size: fs.statSync(part).size, ref: refOf(msg, kind), refAt: Date.now() });
       }
     } catch (e) {
       if (!e.tooLarge) throw e;
-      addLog("  ⚠ וואטסאפ לא מקבל קובץ בגודל הזה, מנסה חלקים קטנים יותר");
+      if (kind === "document") {
+        ep.docTooBig = true;
+        addLog("  ⚠ וואטסאפ לא מקבלת גם קובץ שלם בגודל הזה. מחלק לחלקים");
+      } else {
+        if (!limit) st.videoRejectedAt = Math.min(st.videoRejectedAt || Infinity, size);
+        addLog("  ⚠ וואטסאפ לא מקבלת סרטון בגודל הזה");
+      }
       await undo(sent);
       continue;
     }
-    ep.media = { key: sourceKey(ep.source), limit, parts: refs };
-    if (limit && st.maxVideoBytes !== limit) st.maxVideoBytes = limit;
+    ep.media = { key: sourceKey(ep.source), kind, limit, parts: refs };
+    if (kind === "video" && limit && st.maxVideoBytes !== limit) st.maxVideoBytes = limit;
     ep.lastUsed = Date.now();
     save();
     return;
   }
-  throw new Error("וואטסאפ לא מקבל את הסרטון גם אחרי חלוקה לחלקים קטנים");
+  throw new Error("וואטסאפ לא מקבלת את הסרטון גם כקובץ וגם בחלקים קטנים");
 }

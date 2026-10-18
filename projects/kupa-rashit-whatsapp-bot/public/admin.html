@@ -121,6 +121,9 @@
   .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--card); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
   .seg button { padding: 9px; border-radius: 9px; font-weight: 600; color: var(--muted); }
   .seg button.on { background: var(--card2); color: var(--text); }
+  .seg.mini { margin: 0; flex: none; grid-template-columns: auto auto; }
+  .seg.mini button { padding: 7px 10px; font-size: 13px; }
+  .seg.mini button.on { background: var(--gold); color: #1d1530; }
   .filepick { display: block; border: 2px dashed var(--line); border-radius: 14px; padding: 18px; text-align: center; color: var(--muted); }
   .filepick b { color: var(--text); }
   .menu-item { display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 6px; border-top: 1px solid var(--line); font-size: 16px; text-align: right; }
@@ -183,6 +186,10 @@
       <div class="set">
         <div class="txt"><b>העלאה אחת לכל הלקוחות</b><span>סרטון שכבר הועלה לוואטסאפ נשלח לשאר הלקוחות בלי להעלות שוב</span></div>
         <button class="switch" id="reuse" data-act="reuse"></button>
+      </div>
+      <div class="set">
+        <div class="txt"><b>פרק גדול מדי לסרטון</b><span id="bigTxt"></span></div>
+        <div class="seg mini"><button data-act="bigAs" data-v="document" id="bigDoc">📄 קובץ שלם</button><button data-act="bigAs" data-v="parts" id="bigParts">🧩 חלקים</button></div>
       </div>
       <div class="set">
         <div class="txt"><b>גודל מקסימלי לחלק</b><span id="maxTxt"></span></div>
@@ -290,6 +297,7 @@ function renderCustomers() {
 
 function epChips(e) {
   const chips = e.type === 'drive' ? ['<span class="chip warn">🔗 ישן מדרייב</span>'] : [];
+  if (e.wholeFile) chips.push('<span class="chip">📄 קובץ שלם</span>');
   if (e.parts > 1) chips.push(`<span class="chip">🧩 ${e.parts} חלקים</span>`);
   if (e.uploaded) chips.push('<span class="chip ok">☁ בוואטסאפ</span>');
   if (e.onPhone) chips.push(`<span class="chip">📱 ${fmt(e.localBytes)}</span>`);
@@ -338,6 +346,10 @@ function renderTop() {
   $('keepDays').textContent = st.keepDays;
   $('keepTxt').textContent = st.keepDays ? `${st.keepDays} ימים אחרי השימוש האחרון` : 'מיד אחרי כל סנכרון';
   $('reuse').classList.toggle('on', !!st.reuseUploads);
+  $('bigDoc').classList.toggle('on', st.bigAs !== 'parts'); $('bigParts').classList.toggle('on', st.bigAs === 'parts');
+  $('bigTxt').textContent = st.bigAs === 'parts'
+    ? 'מחולק לכמה סרטונים שמתנגנים בצ׳אט ("חלק 1 מתוך 3")'
+    : 'נשלח כקובץ MP4 אחד שלם (עד 2GB). הלקוח מוריד אותו ופותח בנגן. פרק שנכנס כסרטון נשלח כסרטון רגיל';
   $('maxTxt').textContent = st.maxVideoBytes ? `וואטסאפ קיבלה חלקים של עד ${fmt(st.maxVideoBytes)}` : 'עוד לא נלמד. ייקבע בהעלאה הראשונה';
   $('diskTxt').textContent = `סה״כ ${fmt(disk)} · סרטונים שהעלית: ${fmt(state.storage.media)} · חלקים: ${fmt(state.storage.cache)}`;
 }
@@ -555,6 +567,7 @@ const actions = {
   addEp: () => episodeForm(null, 'new'),
   keep: (b) => run(api('PUT', '/api/settings', { keepDays: Math.max(0, state.settings.keepDays + Number(b.dataset.d)) })),
   reuse: () => run(api('PUT', '/api/settings', { reuseUploads: !state.settings.reuseUploads })),
+  bigAs: (b) => run(api('PUT', '/api/settings', { bigAs: b.dataset.v }), 'נשמר. פרקים שכבר נשלחו יוחלפו בסנכרון הבא (אם הקובץ עדיין בטלפון)'),
   resetMax: () => run(api('PUT', '/api/settings', { resetMaxVideo: true }), 'אופס. בפעם הבאה ינסה שוב את הגודל המלא'),
   cleanup: () => confirm('למחוק עכשיו מהטלפון את כל הסרטונים שבטוח למחוק?') && run(api('POST', '/api/cleanup'), (r) => `🧹 פונו ${fmt(r.freed)}`),
 };
