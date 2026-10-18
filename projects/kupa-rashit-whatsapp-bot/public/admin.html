@@ -190,9 +190,9 @@
     </div>
     <div class="card help">
       <h3>📤 לאן הסרטונים הולכים?</h3>
-      <p>הסרטון יורד לטלפון שלך (מדרייב או מהעלאה), מוצפן ומועלה לשרתים של וואטסאפ. בקבוצה של הלקוח נשלחת הודעה עם המפתח לפענוח, והטלפון שלו מוריד את הסרטון משם.</p>
-      <h3>🧹 למה מותר למחוק מהטלפון?</h3>
-      <p>הלקוח מוריד מהשרתים של וואטסאפ, לא מהטלפון שלך. הקובץ אצלך נחוץ רק כדי להעלות שוב, אם וואטסאפ כבר מחקה אותו. סרטון מדרייב יירד שוב לבד. סרטון שהעלית מהטלפון יימחק רק אחרי שהועלה, ואם יצטרכו אותו שוב תתבקש להעלות אותו מחדש.</p>
+      <p>כשאתה מעלה פרק, הבוט שומר עותק משלו בטלפון. בסנכרון הוא מעלה אותו פעם אחת לוואטסאפ, והלקוחות מורידים אותו משם. את הקובץ המקורי (למשל בהורדות) אפשר למחוק אחרי ההעלאה לבוט.</p>
+      <h3>🧹 מה עושה "פינוי עכשיו"?</h3>
+      <p>מוחק מהטלפון את העותקים של הבוט, אבל רק של פרקים שכבר הועלו לוואטסאפ. פרק שעוד לא הועלה נשאר. הלקוחות לא מושפעים, כי הם מורידים מוואטסאפ. אם יום אחד וואטסאפ תמחק את העותק שלה ומישהו יבקש את הפרק, תתבקש להעלות אותו שוב. אותו דבר קורה אוטומטית אחרי מספר הימים שלמעלה.</p>
       <h3>📥 בקשות מלקוחות</h3>
       <p>סרטון לא נפתח ללקוח? הוא עושה "השב" לסרטון וכותב משהו, או כותב "עונה 6 פרק 4". בסנכרון הבא ההודעה שלו נמחקת והסרטון נשלח שוב.</p>
       <h3>🔎 חיפוש בוואטסאפ</h3>
@@ -285,7 +285,7 @@ function renderCustomers() {
 }
 
 function epChips(e) {
-  const chips = [e.type === 'drive' ? '<span class="chip blue">🔗 דרייב</span>' : '<span class="chip">📁 קובץ</span>'];
+  const chips = e.type === 'drive' ? ['<span class="chip warn">🔗 ישן מדרייב</span>'] : [];
   if (e.parts > 1) chips.push(`<span class="chip">🧩 ${e.parts} חלקים</span>`);
   if (e.uploaded) chips.push('<span class="chip ok">☁ בוואטסאפ</span>');
   if (e.onPhone) chips.push(`<span class="chip">📱 ${fmt(e.localBytes)}</span>`);
@@ -298,7 +298,7 @@ function renderEpisodes() {
   const m = q.match(/(\d+)\D+(\d+)/);
   const list = state.episodes.filter((e) => !q || (m ? e.season == m[1] && e.episode == m[2] : String(e.season) === q || e.title.includes(q)));
   if (!state.episodes.length) {
-    $('episodes').innerHTML = `<div class="empty"><div class="big">🎬</div><p>אין עדיין פרקים.<br>לחץ על + כדי להוסיף פרק מקישור לדרייב או מקובץ.</p></div>`;
+    $('episodes').innerHTML = `<div class="empty"><div class="big">🎬</div><p>אין עדיין פרקים.<br>לחץ על + כדי להעלות סרטון מהטלפון.</p></div>`;
     return;
   }
   let html = '', season = null;
@@ -335,7 +335,7 @@ function renderTop() {
   $('keepTxt').textContent = st.keepDays ? `${st.keepDays} ימים אחרי השימוש האחרון` : 'מיד אחרי כל סנכרון';
   $('reuse').classList.toggle('on', !!st.reuseUploads);
   $('maxTxt').textContent = st.maxVideoBytes ? `וואטסאפ קיבלה חלקים של עד ${fmt(st.maxVideoBytes)}` : 'עוד לא נלמד. ייקבע בהעלאה הראשונה';
-  $('diskTxt').textContent = `סה״כ ${fmt(disk)} · מדרייב וחלקים: ${fmt(state.storage.cache)} · קבצים שהעלית: ${fmt(state.storage.media)}`;
+  $('diskTxt').textContent = `סה״כ ${fmt(disk)} · סרטונים שהעלית: ${fmt(state.storage.media)} · חלקים: ${fmt(state.storage.cache)}`;
 }
 
 async function load() {
@@ -449,7 +449,6 @@ function epMenu(id) {
     <button class="menu-item" data-act="editEp" data-id="${id}">✏️ עריכת עונה / פרק / שם</button>
     <button class="menu-item" data-act="replaceEp" data-id="${id}">🔁 החלפת הסרטון</button>
     ${e.fileGone ? `<button class="menu-item" data-act="reattach" data-id="${id}">📁 העלאה מחדש לטלפון (אותו סרטון)</button>` : ''}
-    ${e.link ? `<a class="menu-item" href="${esc(e.link)}" target="_blank" style="color:inherit;text-decoration:none">🔗 פתיחה בדרייב</a>` : ''}
     <button class="menu-item red" data-act="delEp" data-id="${id}">🗑 מחיקת פרק</button>`);
 }
 
@@ -469,20 +468,12 @@ function episodeForm(e, mode) {
       </div>
       <div class="field"><label>שם הפרק (לא חובה)</label><input name="title" value="${esc(e?.title)}"></div>` : `<p class="muted">בחר את אותו סרטון של עונה ${e.season} פרק ${e.episode}. הלקוחות לא יקבלו אותו שוב.</p>`}
       ${showVideo ? `
-        ${mode !== 'reattach' ? `<div class="seg"><button type="button" class="on" data-src="link">🔗 קישור לדרייב</button><button type="button" data-src="file">📁 קובץ מהטלפון</button></div>` : ''}
-        <div class="field" id="linkField" ${mode === 'reattach' ? 'hidden' : ''}><label>קישור לדרייב (שיתוף: כל מי שיש לו את הקישור)</label><input name="link" class="ltr" inputmode="url" placeholder="https://drive.google.com/file/d/…"></div>
-        <label class="filepick" id="fileField" ${mode === 'reattach' ? '' : 'hidden'}><input type="file" name="file" accept="video/*" hidden><span id="fileName">📁 <b>בחירת סרטון</b> (MP4)</span></label>
+        <label class="filepick" id="fileField"><input type="file" name="file" accept="video/*" hidden><span id="fileName">📁 <b>בחירת סרטון</b> (MP4)</span></label>
         <progress id="upProg" value="0" max="1" hidden></progress>` : ''}
       <div class="err" id="formErr"></div>
       <button class="btn gold block" style="margin-top:12px">${mode === 'new' ? 'הוספה' : 'שמירה'}</button>
     </form>`);
-  let src = mode === 'reattach' ? 'file' : 'link';
   const f = $('epForm');
-  f.querySelectorAll('[data-src]').forEach((b) => (b.onclick = () => {
-    src = b.dataset.src;
-    f.querySelectorAll('[data-src]').forEach((x) => x.classList.toggle('on', x === b));
-    $('linkField').hidden = src !== 'link'; $('fileField').hidden = src !== 'file';
-  }));
   const fileInput = f.querySelector('input[type=file]');
   if (fileInput) fileInput.onchange = () => { const x = fileInput.files[0]; if (x) $('fileName').innerHTML = `🎞 <b>${esc(x.name)}</b> · ${fmt(x.size)}`; };
   f.onsubmit = async (ev) => {
@@ -492,22 +483,11 @@ function episodeForm(e, mode) {
     const btn = f.querySelector('.btn.gold'); btn.disabled = true;
     try {
       if (mode === 'edit') await api('PUT', `/api/episodes/${e.id}`, d);
-      else if (src === 'link') await saveLink(d, e);
       else await upload(fileInput.files[0], d, e, mode);
       closeSheet(); toast('נשמר ✓');
     } catch (err) { $('formErr').textContent = err.message; }
     btn.disabled = false;
   };
-}
-
-async function saveLink(d, e, replace = false) {
-  try {
-    await api('POST', '/api/episodes', { ...d, id: e?.id, replace });
-  } catch (err) {
-    if (err.message !== 'EXISTS') throw err;
-    if (!confirm(`עונה ${d.season} פרק ${d.episode} כבר קיים. להחליף את הסרטון שלו?`)) throw new Error('לא נשמר');
-    return saveLink(d, e, true);
-  }
 }
 
 function upload(file, d, e, mode, replace = false) {

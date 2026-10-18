@@ -31,12 +31,9 @@ import { addLog, enqueue, isIdle, jobsStatus } from "./jobs.js";
 import {
   cleanupLocal,
   deleteSourceFile,
-  driveLink,
-  ensureDriveFile,
   episodeLocalBytes,
   formatBytes,
   localSourcePath,
-  parseDriveLink,
   saveUpload,
   storageInfo,
 } from "./media.js";
@@ -94,7 +91,6 @@ function episodeView(ep) {
     episode: ep.episode,
     title: ep.title || "",
     type: ep.source.type,
-    link: ep.source.type === "drive" ? driveLink(ep.source.fileId) : null,
     parts: plan?.parts.length || null,
     uploaded: !!plan?.parts.every((p) => p.ref),
     onPhone: !!localSourcePath(ep.source) || !!ep.localFiles?.length,
@@ -242,28 +238,6 @@ route("POST", /^\/api\/customers\/([\w-]+)\/resend$/, async (req, [id]) => {
 route("POST", /^\/api\/sync-all$/, () => ({ count: queueSyncAll() }));
 
 // Episodes
-route("POST", /^\/api\/episodes$/, async (req) => {
-  const b = await readJson(req);
-  const fields = parseEpisodeFields(b);
-  const drive = parseDriveLink(b.link);
-  if (!drive) throw new Error("קישור לדרייב לא תקין");
-  const old = b.id ? mustEpisode(b.id) : null;
-  const existing = clash(fields, old?.id);
-  if (existing && !b.replace) throw new Error("EXISTS");
-  if (old && existing) throw new Error("כבר קיים פרק עם אותה עונה ומספר פרק");
-  if (old) {
-    deleteSourceFile(old.source);
-    Object.assign(old, fields, { source: { type: "drive", fileId: drive.fileId, link: drive.link }, updatedAt: Date.now() });
-    save();
-  } else {
-    if (existing) deleteSourceFile(existing.source);
-    upsertEpisode({ ...fields, source: { type: "drive", fileId: drive.fileId, link: drive.link } });
-  }
-  addLog(`➕ פרק נשמר: עונה ${fields.season} פרק ${fields.episode} (דרייב)`);
-  // Download now, so a bad link shows up right away.
-  ensureDriveFile(drive.fileId).catch((e) => addLog(`⚠ עונה ${fields.season} פרק ${fields.episode}: ${e.message}`));
-  return { ok: true };
-});
 // Edit season/episode/title without changing the video.
 route("PUT", /^\/api\/episodes\/([\w-]+)$/, async (req, [id]) => {
   const ep = mustEpisode(id);
@@ -286,7 +260,7 @@ route("POST", /^\/api\/episodes\/upload$/, async (req) => {
   const q = Object.fromEntries(new URL(req.url, "http://x").searchParams);
   if (q.reattach) {
     const ep = mustEpisode(q.id);
-    if (ep.source.type !== "file") throw new Error("הפרק הזה מדרייב");
+    if (ep.source.type !== "file") throw new Error("זה פרק ישן מדרייב. השתמש ב\"החלפת הסרטון\"");
     await saveUpload(req, ep.source.file);
     ep.lastUsed = Date.now();
     delete ep.localDeletedAt;

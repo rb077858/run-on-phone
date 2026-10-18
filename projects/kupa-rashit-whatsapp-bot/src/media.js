@@ -1,30 +1,14 @@
-// Episode videos on the phone: downloads from Google Drive links, admin-panel uploads,
-// split parts, and deleting them again after a few days. Everything is streamed to disk,
+// Episode videos on the phone: admin-panel uploads, split parts, and deleting them again
+// after a few days. Everything is streamed to disk,
 // never held in memory.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Readable, Transform } from "node:stream";
+import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { CACHE_DIR, MEDIA_DIR } from "./config.js";
 import { newId } from "./db.js";
 import { splitMp4 } from "./mp4split.js";
-
-// ---------------------------------------------------------------- Drive links
-const DRIVE_HOST = /(drive|docs)\.google\.com|drive\.usercontent\.google\.com/;
-
-/** Finds a Google Drive file link in text → { link, fileId } or null. */
-export function parseDriveLink(text) {
-  for (const m of String(text || "").matchAll(/https?:\/\/\S+/g)) {
-    const link = m[0];
-    if (!DRIVE_HOST.test(link)) continue;
-    const id = link.match(/\/d\/([\w-]{15,})/)?.[1] || link.match(/[?&]id=([\w-]{15,})/)?.[1];
-    if (id) return { link, fileId: id };
-  }
-  return null;
-}
-
-export const driveLink = (fileId) => `https://drive.google.com/file/d/${fileId}/view`;
 
 function progressCounter(total, onProgress) {
   let done = 0;
@@ -50,46 +34,6 @@ async function streamToFile(body, dest, total, onProgress) {
     fs.rmSync(tmp, { force: true });
     throw e;
   }
-}
-
-const inFlight = new Map();
-
-/** Path of the cached Drive video; downloads it first if needed. */
-export function ensureDriveFile(fileId, onProgress) {
-  const dest = path.join(CACHE_DIR, `drive-${fileId}.mp4`);
-  if (fs.existsSync(dest)) return Promise.resolve(dest);
-  if (!inFlight.has(fileId)) {
-    const p = downloadDrive(fileId, dest, onProgress).finally(() => inFlight.delete(fileId));
-    inFlight.set(fileId, p);
-  }
-  return inFlight.get(fileId);
-}
-
-async function downloadDrive(fileId, dest, onProgress) {
-  let res = await fetch(
-    `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`,
-    { redirect: "follow" },
-  );
-  // Big files get a "can't scan for viruses" page with a form that leads to the real file.
-  if (res.ok && /text\/html/.test(res.headers.get("content-type") || "")) {
-    const html = await res.text();
-    const action = html.match(/<form[^>]+action="([^"]+)"/)?.[1];
-    if (!action) throw new Error("הקובץ בדרייב לא נגיש. ודא שהשיתוף הוא \"כל מי שיש לו את הקישור\"");
-    const params = new URLSearchParams();
-    for (const m of html.matchAll(/<input[^>]+type="hidden"[^>]*>/g)) {
-      const name = m[0].match(/name="([^"]+)"/)?.[1];
-      const value = m[0].match(/value="([^"]*)"/)?.[1] ?? "";
-      if (name) params.set(name, value);
-    }
-    res = await fetch(`${action.replace(/&amp;/g, "&")}?${params}`, { redirect: "follow" });
-    if (/text\/html/.test(res.headers.get("content-type") || "")) {
-      throw new Error("דרייב החזיר דף במקום קובץ (אולי חרגת ממכסת ההורדות, או שהקובץ לא משותף)");
-    }
-  }
-  if (!res.ok) throw new Error(`הורדה מדרייב נכשלה: HTTP ${res.status}`);
-  const total = Number(res.headers.get("content-length")) || 0;
-  await streamToFile(Readable.fromWeb(res.body), dest, total, onProgress);
-  return dest;
 }
 
 // ------------------------------------------------------------------ uploads
@@ -120,14 +64,17 @@ export function videoParts(file, maxBytes) {
 }
 
 // ------------------------------------------------------------------- sources
-/** Local path of an episode's video, downloading from Drive if needed. */
-export function episodeFile(source, onProgress) {
-  if (source.type === "drive") return ensureDriveFile(source.fileId, onProgress);
-  const p = path.join(MEDIA_DIR, source.file);
-  if (!fs.existsSync(p)) {
-    return Promise.reject(new Error("קובץ הסרטון כבר נמחק מהטלפון. העלה אותו שוב בממשק (בפרק: \"העלאה מחדש\")"));
-  }
-  return Promise.resolve(p);
+/** Local path of an episode's video (rejects if it is no longer on the phone). */
+export function episodeFile(source) {
+  const p = localSourcePath(source);
+  if (p) return Promise.resolve(p);
+  return Promise.reject(
+    new Error(
+      source.type === "file"
+        ? "קובץ הסרטון כבר נמחק מהטלפון. העלה אותו שוב בממשק (בפרק: ⋯ ← העלאה מחדש לטלפון)"
+        : "זה פרק ישן מקישור לדרייב. העלה את הסרטון כקובץ (בפרק: ⋯ ← החלפת הסרטון)",
+    ),
+  );
 }
 
 /** Local path of the episode's full video if it is on the phone right now, else null. */
@@ -166,9 +113,9 @@ export function episodeLocalBytes(ep) {
 }
 
 /**
- * Deletes videos from the phone that were not used for `keepDays` days. Only safe ones:
- * Drive videos (can be downloaded again) and uploaded videos that WhatsApp already has
- * (every part uploaded at least once). Split parts and unknown cache files go too.
+ * Deletes videos from the phone that were not used for `keepDays` days – only those that
+ * WhatsApp already has (every part uploaded at least once). Split parts and unknown cache
+ * files go too.
  * Returns the number of bytes freed.
  */
 export function cleanupLocal(episodes, keepDays, force = false) {
@@ -183,13 +130,13 @@ export function cleanupLocal(episodes, keepDays, force = false) {
   const keep = new Set();
   for (const ep of episodes) {
     const uploaded = ep.media?.parts?.length && ep.media.parts.every((p) => p.ref);
-    const safe = ep.source.type === "drive" || uploaded;
+    const safe = uploaded;
     const old = force || (ep.lastUsed || ep.addedAt || 0) < cutoff;
     const files = [localSourcePath(ep.source), ...(ep.localFiles || [])].filter(Boolean);
     if (safe && old) {
       files.forEach(rm);
       ep.localFiles = [];
-      if (ep.source.type === "file" && files.length) ep.localDeletedAt = Date.now();
+      if (files.length) ep.localDeletedAt = Date.now();
     } else files.forEach((f) => keep.add(path.resolve(f)));
   }
   // Leftovers in the cache that no episode uses (deleted episodes, old split sizes, …).

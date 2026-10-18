@@ -6,7 +6,7 @@ import { DB_FILE } from "./config.js";
 
 const empty = () => ({
   settings: {},
-  // { id, season, episode, title, source: { type: "drive", fileId, link } | { type: "file", file },
+  // { id, season, episode, title, source: { type: "file", file } (or "drive" from older versions),
   //   media: { key, limit, parts: [{ size, ref, refAt }] }  ← how it was uploaded to WhatsApp
   //   lastUsed, localFiles, addedAt }
   episodes: [],

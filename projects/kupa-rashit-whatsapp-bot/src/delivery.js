@@ -4,7 +4,7 @@
 // to it ("ref": url, directPath, mediaKey, hashes…) is saved on the episode, so the same
 // upload can be sent again – to other customers, or as a resend – without uploading the
 // file again, for as long as WhatsApp still keeps it. When it is gone, the part is
-// uploaded again from the phone (downloading it from Drive first if needed).
+// uploaded again from the phone.
 import { generateWAMessageFromContent, getUrlFromDirectPath, proto } from "baileys";
 import fs from "node:fs";
 import { THUMBNAIL, episodeCaption } from "./config.js";
@@ -71,11 +71,7 @@ async function upload(sock, jid, file, caption, name) {
 // ----------------------------------------------------------------- files
 async function sourceFile(ep) {
   ep.lastUsed = Date.now();
-  const file = await episodeFile(ep.source, (done, total) =>
-    setProgress(`⬇ ${label(ep)} מדרייב: ${total ? `${Math.floor((done / total) * 100)}% · ` : ""}${formatBytes(done)}${total ? `/${formatBytes(total)}` : ""}`),
-  );
-  setProgress(null);
-  return file;
+  return episodeFile(ep.source);
 }
 
 function partFiles(ep, file, limit) {
@@ -172,8 +168,6 @@ export async function firstUpload(c, s, sock, ep, onSent, undo) {
       continue;
     }
     ep.media = { key: sourceKey(ep.source), limit, parts: refs };
-    // A split Drive video: keep only the parts (the original can be downloaded again).
-    if (parts.length > 1 && ep.source.type === "drive") fs.rmSync(file, { force: true });
     if (limit && st.maxVideoBytes !== limit) st.maxVideoBytes = limit;
     ep.lastUsed = Date.now();
     save();

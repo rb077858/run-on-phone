@@ -7,7 +7,7 @@ export const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 export const PORT = Number(process.env.PORT || 3000);
 export const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(APP_DIR, "data"));
 export const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
-// Videos downloaded from Drive (can be cleared; re-downloaded when needed).
+// Split parts (and Drive downloads of older versions). Can be cleared.
 export const CACHE_DIR = path.join(DATA_DIR, "cache");
 // Video files sent directly (WhatsApp / admin upload). Kept until the episode is deleted.
 export const MEDIA_DIR = path.join(DATA_DIR, "media");
