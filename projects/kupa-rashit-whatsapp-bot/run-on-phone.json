@@ -1,0 +1,11 @@
+{
+  "name": "קופה ראשית – בוט פרקים",
+  "description": "ניהול לקוחות וסנכרון פרקים לקבוצות וואטסאפ",
+  "entry": "src/index.js",
+  "nodeOptions": ["--max-old-space-size=384"],
+  "ui": [
+    { "label": "ממשק ניהול", "path": "/admin" },
+    { "label": "חיבור וואטסאפ מנהל", "path": "/qr" }
+  ],
+  "exclude": ["data", "README.md"]
+}

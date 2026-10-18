@@ -1,0 +1,19 @@
+{
+  "name": "kupa-rashit-whatsapp-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "בוט וואטסאפ שמסנכרן פרקים של קופה ראשית לקבוצות של לקוחות",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4"
+  }
+}

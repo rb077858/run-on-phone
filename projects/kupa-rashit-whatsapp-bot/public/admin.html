@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>קופה ראשית – ניהול</title>
+<style>
+  :root { --bg:#14111f; --card:#1f1a30; --line:#342b4f; --text:#f1eefb; --muted:#a59dc2; --accent:#f6c343; --ok:#4cd28a; --bad:#ff6b6b; --warn:#ffa94d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  header { padding:16px; background:linear-gradient(135deg,#2b1f52,#14111f); border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:20px; }
+  header .sub { color:var(--muted); font-size:13px; }
+  main { padding:12px; max-width:760px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .card h2 { margin:0 0 10px; font-size:17px; display:flex; align-items:center; gap:8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .grow { flex:1; min-width:0; }
+  input { width:100%; padding:10px; border-radius:10px; border:1px solid var(--line); background:#151125; color:var(--text); font-size:15px; }
+  input[type=number] { width:80px; }
+  button, .btn { border:0; border-radius:10px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; background:#3a3060; color:var(--text); text-decoration:none; display:inline-block; }
+  button.primary, .btn.primary { background:var(--accent); color:#1b1530; }
+  button.danger { background:#5a2333; color:#ffd6dc; }
+  button.small, .btn.small { padding:6px 10px; font-size:13px; }
+  button:disabled { opacity:.5; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; background:#2c2545; color:var(--muted); white-space:nowrap; }
+  .pill.ok { background:#173b2a; color:var(--ok); } .pill.bad { background:#47202a; color:var(--bad); } .pill.warn { background:#46321a; color:var(--warn); }
+  .item { border-top:1px solid var(--line); padding:10px 0; }
+  .item:first-child { border-top:0; }
+  .muted { color:var(--muted); font-size:13px; }
+  .season { margin:10px 0 2px; font-weight:700; color:var(--accent); }
+  .ep { display:flex; gap:8px; align-items:center; padding:6px 0; border-top:1px dashed var(--line); }
+  .ep .grow { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #log { background:#0e0c17; border-radius:10px; padding:10px; font:12px/1.5 ui-monospace, monospace; max-height:260px; overflow:auto; white-space:pre-wrap; direction:rtl; }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; }
+  .tabs button { flex:1; }
+  .tabs button.on { background:var(--accent); color:#1b1530; }
+  .err { color:var(--bad); font-size:13px; min-height:1em; }
+  dialog { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:14px; width:min(420px, 92vw); }
+  dialog::backdrop { background:#000a; }
+  progress { width:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 קופה ראשית – ממשק ניהול</h1>
+  <div class="sub">ראם בוטים 🤖</div>
+</header>
+<main>
+  <section class="card">
+    <h2>👑 וואטסאפ מנהל</h2>
+    <div class="row">
+      <div class="grow" id="mgr">…</div>
+      <a class="btn small" href="/qr">חיבור / ניהול</a>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>🔄 סנכרון</h2>
+    <div class="row">
+      <button class="primary" onclick="api('POST','/api/sync-all').then(r=>toast(r.count?`סנכרון של ${r.count} לקוחות התחיל`:'אין לקוחות מחוברים'))">סנכרון כל הלקוחות</button>
+      <div class="grow muted" id="job"></div>
+    </div>
+    <div class="muted" style="margin-top:6px">כשהסנכרון מסתיים אפשר לעצור את הבוט מהאפליקציה.</div>
+  </section>
+
+  <section class="card">
+    <h2>👥 לקוחות <span class="pill" id="custCount">0</span></h2>
+    <form id="addCust" class="row" onsubmit="addCustomer(event)">
+      <input class="grow" name="firstName" placeholder="שם פרטי" required style="min-width:110px">
+      <input class="grow" name="lastName" placeholder="שם משפחה" style="min-width:110px">
+      <input class="grow" name="phone" placeholder="טלפון (050…)" inputmode="tel" required style="min-width:140px">
+      <button class="primary">הוספה</button>
+    </form>
+    <div class="err" id="custErr"></div>
+    <div id="customers"></div>
+  </section>
+
+  <section class="card">
+    <h2>📺 פרקים <span class="pill" id="epCount">0</span></h2>
+    <div class="tabs">
+      <button id="tabLink" class="on" onclick="tab('link')">קישור לדרייב</button>
+      <button id="tabFile" onclick="tab('file')">קובץ סרטון</button>
+    </div>
+    <form id="addEp" onsubmit="addEpisode(event)">
+      <div class="row">
+        <input type="number" name="season" placeholder="עונה" min="0" required>
+        <input type="number" name="episode" placeholder="פרק" min="0" required>
+        <input class="grow" name="title" placeholder="כותרת (לא חובה)">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input class="grow" name="link" id="linkInput" placeholder="https://drive.google.com/file/d/…" inputmode="url">
+        <input class="grow" type="file" name="file" id="fileInput" accept="video/*" style="display:none">
+        <button class="primary">שמירה</button>
+      </div>
+      <progress id="upProg" max="1" value="0" style="display:none"></progress>
+    </form>
+    <div class="err" id="epErr"></div>
+    <div class="muted">אפשר גם לשלוח פרקים בקבוצה "קופה ראשית מנהל" (קישור או סרטון). קבצי דרייב צריכים שיתוף "כל מי שיש לו את הקישור".</div>
+    <div id="episodes"></div>
+    <div class="row muted" style="margin-top:10px">
+      <span class="grow" id="storage"></span>
+      <button class="small" onclick="if(confirm('למחוק את הסרטונים שהורדו מדרייב? הם יירדו שוב בסנכרון הבא.'))api('POST','/api/cache/clear').then(load)">ניקוי מטמון דרייב</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>📜 יומן</h2>
+    <div id="log"></div>
+  </section>
+</main>
+
+<dialog id="editCust">
+  <form method="dialog" onsubmit="saveCustomer(event)">
+    <h3 style="margin-top:0">עריכת לקוח</h3>
+    <input type="hidden" name="id">
+    <p><input name="firstName" placeholder="שם פרטי" required></p>
+    <p><input name="lastName" placeholder="שם משפחה"></p>
+    <p><input name="phone" placeholder="טלפון" required inputmode="tel"></p>
+    <div class="err" id="editCustErr"></div>
+    <div class="row"><button class="primary">שמירה</button><button type="button" onclick="editCust.close()">ביטול</button></div>
+  </form>
+</dialog>
+
+<dialog id="editEp">
+  <form method="dialog" onsubmit="saveEpisode(event)">
+    <h3 style="margin-top:0">עריכת פרק</h3>
+    <input type="hidden" name="id">
+    <div class="row"><input type="number" name="season" placeholder="עונה" required><input type="number" name="episode" placeholder="פרק" required></div>
+    <p><input name="title" placeholder="כותרת"></p>
+    <p><input name="link" placeholder="קישור חדש לדרייב (ריק = בלי שינוי בסרטון)"></p>
+    <div class="err" id="editEpErr"></div>
+    <div class="row"><button class="primary">שמירה</button><button type="button" onclick="editEp.close()">ביטול</button></div>
+  </form>
+</dialog>
+
+<script>
+let state = null;
+let lastRaw = '';
+let mode = 'link';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const fmt = (n) => n >= 1<<30 ? (n/(1<<30)).toFixed(2)+'GB' : n >= 1<<20 ? (n/(1<<20)).toFixed(1)+'MB' : Math.round(n/1024)+'KB';
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'שגיאה');
+  setTimeout(load, 300);
+  return data;
+}
+const toast = (m) => { $('job').textContent = m; };
+const formData = (f) => Object.fromEntries(new FormData(f));
+
+function waPill(c) {
+  if (c.status === 'blocked') return '<span class="pill bad">⛔ חסום</span>';
+  if (c.wa.state === 'open') return '<span class="pill ok">● מחובר עכשיו</span>';
+  if (c.wa.linked) return '<span class="pill ok">✓ וואטסאפ מקושר</span>';
+  if (c.wa.state === 'qr' || c.wa.state === 'connecting') return '<span class="pill warn">ממתין לחיבור</span>';
+  return '<span class="pill">לא מחובר</span>';
+}
+
+function renderCustomers() {
+  const total = state.episodes.length;
+  $('custCount').textContent = state.customers.length;
+  $('customers').innerHTML = state.customers.map((c) => `
+    <div class="item">
+      <div class="row">
+        <div class="grow"><b>${esc(c.name)}</b> <span class="muted" dir="ltr">+${esc(c.phone)}</span></div>
+        ${waPill(c)}
+      </div>
+      <div class="muted">
+        ${c.status === 'blocked' ? `נחסם: ${esc(c.blockedReason)}` : c.wa.linked ? `בקבוצה: ${c.sentCount}/${total} פרקים${c.lastSync ? ` · סנכרון אחרון ${new Date(c.lastSync).toLocaleString('he-IL')}` : ''}` : 'צריך לחבר את הוואטסאפ של הלקוח'}
+        ${c.wa.error ? `<div class="err">${esc(c.wa.error)}</div>` : ''}
+      </div>
+      <div class="row" style="margin-top:6px">
+        ${c.status === 'blocked'
+          ? `<button class="small primary" onclick="act('${c.id}','unblock','לבטל את החסימה? קבוצת החסימה תימחק וקבוצת פרקים חדשה תיווצר.')">ביטול חסימה</button>`
+          : c.wa.linked
+            ? `<button class="small primary" onclick="act('${c.id}','sync')">סנכרון</button>`
+            : `<a class="btn small primary" href="/connect/${c.id}">חיבור וואטסאפ לקוח</a>`}
+        <button class="small" onclick="openEditCust('${c.id}')">עריכה</button>
+        ${c.wa.linked ? `<button class="small" onclick="act('${c.id}','logout','לנתק את הבוט מהוואטסאפ של הלקוח?')">ניתוק</button>` : ''}
+        <button class="small danger" onclick="delCust('${c.id}')">מחיקה</button>
+      </div>
+    </div>`).join('') || '<div class="muted">אין עדיין לקוחות.</div>';
+}
+
+function renderEpisodes() {
+  $('epCount').textContent = state.episodes.length;
+  let html = '', season = null;
+  for (const e of state.episodes) {
+    if (e.season !== season) { season = e.season; html += `<div class="season">עונה ${season}</div>`; }
+    html += `<div class="ep">
+      <span>${e.source.type === 'drive' ? '🔗' : '📁'}</span>
+      <div class="grow">פרק ${e.episode}${e.title ? ' – ' + esc(e.title) : ''}
+        ${e.link ? `<a class="muted" href="${esc(e.link)}" target="_blank">דרייב</a>` : ''}</div>
+      <button class="small" onclick="openEditEp('${e.id}')">עריכה</button>
+      <button class="small danger" onclick="delEp('${e.id}')">🗑</button>
+    </div>`;
+  }
+  $('episodes').innerHTML = html || '<div class="muted" style="margin-top:8px">אין עדיין פרקים.</div>';
+  $('storage').textContent = `אחסון: דרייב ${fmt(state.storage.cache)} · קבצים ${fmt(state.storage.media)}`;
+}
+
+function renderStatus() {
+  const m = state.manager;
+  $('mgr').innerHTML = m.state === 'open'
+    ? `<span class="pill ok">● מחובר</span> <span dir="ltr">+${esc(m.number)}</span> ${m.groupJid ? '<div class="muted">קבוצת "קופה ראשית מנהל" פעילה</div>' : ''}`
+    : m.linked ? '<span class="pill warn">מתחבר…</span>' : '<span class="pill bad">לא מחובר – לחץ "חיבור"</span>';
+  const j = state.jobs;
+  $('job').textContent = j.current ? `⏳ ${j.current}${j.queued.length ? ` (+${j.queued.length} בתור)` : ''}` : 'אין פעולות פעילות';
+  const log = $('log');
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = j.log.join('\n') || 'אין עדיין רשומות.';
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+async function load() {
+  try {
+    const raw = await (await fetch('/api/state')).text();
+    if (raw === lastRaw) return; // don't redraw buttons under the finger for nothing
+    lastRaw = raw;
+    state = JSON.parse(raw);
+    renderStatus(); renderCustomers(); renderEpisodes();
+  } catch {}
+}
+
+async function act(id, what, question) {
+  if (question && !confirm(question)) return;
+  try { const r = await api('POST', `/api/customers/${id}/${what}`); if (r.queued === false) toast('כבר בתור'); }
+  catch (e) { alert(e.message); }
+}
+
+async function addCustomer(ev) {
+  ev.preventDefault();
+  $('custErr').textContent = '';
+  try { await api('POST', '/api/customers', formData(ev.target)); ev.target.reset(); }
+  catch (e) { $('custErr').textContent = e.message; }
+}
+
+function openEditCust(id) {
+  const c = state.customers.find((x) => x.id === id), f = editCust.querySelector('form');
+  f.id.value = c.id; f.firstName.value = c.firstName; f.lastName.value = c.lastName; f.phone.value = '+' + c.phone;
+  $('editCustErr').textContent = '';
+  editCust.showModal();
+}
+async function saveCustomer(ev) {
+  ev.preventDefault();
+  const d = formData(ev.target);
+  try { await api('PUT', `/api/customers/${d.id}`, d); editCust.close(); }
+  catch (e) { $('editCustErr').textContent = e.message; }
+}
+function delCust(id) {
+  const c = state.customers.find((x) => x.id === id);
+  if (confirm(`למחוק את ${c.name}? הבוט גם יתנתק מהוואטסאפ שלו.`)) api('DELETE', `/api/customers/${id}`).catch((e) => alert(e.message));
+}
+
+function tab(m) {
+  mode = m;
+  $('tabLink').classList.toggle('on', m === 'link'); $('tabFile').classList.toggle('on', m === 'file');
+  $('linkInput').style.display = m === 'link' ? '' : 'none';
+  $('fileInput').style.display = m === 'file' ? '' : 'none';
+}
+
+async function addEpisode(ev) {
+  ev.preventDefault();
+  const f = ev.target, d = formData(f);
+  $('epErr').textContent = '';
+  if (state.episodes.some((e) => e.season == d.season && e.episode == d.episode) &&
+      !confirm(`עונה ${d.season} פרק ${d.episode} כבר קיים. להחליף את הסרטון?`)) return;
+  try {
+    if (mode === 'link') {
+      await api('POST', '/api/episodes', d);
+    } else {
+      const file = $('fileInput').files[0];
+      if (!file) throw new Error('בחר קובץ סרטון');
+      await upload(file, d);
+    }
+    f.reset();
+  } catch (e) { $('epErr').textContent = e.message; }
+}
+
+function upload(file, d) {
+  return new Promise((resolve, reject) => {
+    const q = new URLSearchParams({ season: d.season, episode: d.episode, title: d.title || '' });
+    const xhr = new XMLHttpRequest(), prog = $('upProg');
+    xhr.open('POST', '/api/episodes/upload?' + q);
+    prog.style.display = '';
+    xhr.upload.onprogress = (e) => { prog.max = e.total; prog.value = e.loaded; };
+    xhr.onload = () => {
+      prog.style.display = 'none'; load();
+      xhr.status === 200 ? resolve() : reject(new Error(JSON.parse(xhr.responseText || '{}').error || 'ההעלאה נכשלה'));
+    };
+    xhr.onerror = () => { prog.style.display = 'none'; reject(new Error('ההעלאה נכשלה')); };
+    xhr.send(file);
+  });
+}
+
+function openEditEp(id) {
+  const e = state.episodes.find((x) => x.id === id), f = editEp.querySelector('form');
+  f.id.value = e.id; f.season.value = e.season; f.episode.value = e.episode; f.title.value = e.title || ''; f.link.value = '';
+  $('editEpErr').textContent = '';
+  editEp.showModal();
+}
+async function saveEpisode(ev) {
+  ev.preventDefault();
+  const d = formData(ev.target);
+  try {
+    if (d.link.trim()) await api('POST', '/api/episodes', d);
+    else await api('PUT', `/api/episodes/${d.id}`, d);
+    editEp.close();
+  } catch (e) { $('editEpErr').textContent = e.message; }
+}
+function delEp(id) {
+  const e = state.episodes.find((x) => x.id === id);
+  if (confirm(`למחוק את עונה ${e.season} פרק ${e.episode}? בסנכרון הבא הוא יימחק גם אצל הלקוחות.`)) api('DELETE', `/api/episodes/${id}`);
+}
+
+load();
+setInterval(load, 2500);
+</script>
+</body>
+</html>
