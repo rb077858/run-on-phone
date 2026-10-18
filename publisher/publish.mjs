@@ -151,14 +151,20 @@ if (dryRun) {
 }
 
 // ------------------------------------------------------------------ firebase
+// Either a service account key, or (with FIREBASE_PROJECT_ID set) the Google login of
+// `gcloud auth application-default login`.
 const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(here, "service-account.json");
-if (!fs.existsSync(credPath)) {
+const adcProject = process.env.FIREBASE_PROJECT_ID;
+if (!fs.existsSync(credPath) && !adcProject) {
   fail(`Firebase service account key not found at ${credPath}\n  See SETUP.md (step "service account").`);
 }
-const { initializeApp, cert } = await import("firebase-admin/app");
+const { initializeApp, cert, applicationDefault } = await import("firebase-admin/app");
 const { getFirestore, FieldValue } = await import("firebase-admin/firestore");
-const serviceAccount = JSON.parse(fs.readFileSync(credPath, "utf8"));
-initializeApp({ credential: cert(serviceAccount) });
+if (adcProject) {
+  initializeApp({ credential: applicationDefault(), projectId: adcProject });
+} else {
+  initializeApp({ credential: cert(JSON.parse(fs.readFileSync(credPath, "utf8"))) });
+}
 const db = getFirestore();
 const projects = db.collection("projects");
 
