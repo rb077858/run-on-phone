@@ -332,6 +332,31 @@ function buildMoov(buf, moovBox, tracks, ranges, chunksPerTrack, movieTimescale,
   return box("moov", ...children, ...trakBoxes);
 }
 
+/** Reads the moov (and ftyp) of an MP4 file and parses its video/audio tracks. */
+function openMovie(fd, fileSize) {
+  const top = fileBoxes(fd, fileSize);
+  const moovTop = top.find((b) => b.type === "moov");
+  const ftypTop = top.find((b) => b.type === "ftyp");
+  if (!moovTop) throw new Error("הקובץ אינו MP4 תקין (אין moov)");
+  if (top.some((b) => b.type === "moof")) throw new Error("MP4 מקוטע (fragmented) לא נתמך");
+  const buf = Buffer.alloc(moovTop.size);
+  fs.readSync(fd, buf, 0, moovTop.size, moovTop.start);
+  const moov = readBoxes(buf)[0];
+  if (child(buf, moov, "mvex")) throw new Error("MP4 מקוטע (fragmented) לא נתמך");
+  let ftyp = Buffer.alloc(0);
+  if (ftypTop) {
+    ftyp = Buffer.alloc(ftypTop.size);
+    fs.readSync(fd, ftyp, 0, ftypTop.size, ftypTop.start);
+  }
+  const mvhd = child(buf, moov, "mvhd");
+  const movieTimescale = buf.readUInt32BE(mvhd.body + (buf[mvhd.body] === 1 ? 20 : 12));
+  const tracks = readBoxes(buf, moov.body, moov.end)
+    .filter((b) => b.type === "trak")
+    .map((trak) => parseTrack(buf, trak))
+    .filter((t) => (t.handler === "vide" || t.handler === "soun") && t.count > 0);
+  return { buf, moov, ftyp, movieTimescale, tracks };
+}
+
 /**
  * Splits `input` into parts no bigger than maxBytes. Returns the list of written part
  * paths (`${outPrefix}-1.mp4`, …), or [input] if it already fits.
@@ -341,27 +366,7 @@ export function splitMp4(input, outPrefix, maxBytes) {
   try {
     const fileSize = fs.fstatSync(fd).size;
     if (fileSize <= maxBytes) return [input];
-    const top = fileBoxes(fd, fileSize);
-    const moovTop = top.find((b) => b.type === "moov");
-    const ftypTop = top.find((b) => b.type === "ftyp");
-    if (!moovTop) throw new Error("הקובץ אינו MP4 תקין (אין moov)");
-    if (top.some((b) => b.type === "moof")) throw new Error("MP4 מקוטע (fragmented) לא נתמך לחלוקה");
-    const buf = Buffer.alloc(moovTop.size);
-    fs.readSync(fd, buf, 0, moovTop.size, moovTop.start);
-    const moov = readBoxes(buf)[0];
-    if (child(buf, moov, "mvex")) throw new Error("MP4 מקוטע (fragmented) לא נתמך לחלוקה");
-    let ftyp = Buffer.alloc(0);
-    if (ftypTop) {
-      ftyp = Buffer.alloc(ftypTop.size);
-      fs.readSync(fd, ftyp, 0, ftypTop.size, ftypTop.start);
-    }
-    const mvhd = child(buf, moov, "mvhd");
-    const movieTimescale = buf.readUInt32BE(mvhd.body + (buf[mvhd.body] === 1 ? 20 : 12));
-
-    const tracks = readBoxes(buf, moov.body, moov.end)
-      .filter((b) => b.type === "trak")
-      .map((trak) => parseTrack(buf, trak))
-      .filter((t) => (t.handler === "vide" || t.handler === "soun") && t.count > 0);
+    const { buf, moov, ftyp, movieTimescale, tracks } = openMovie(fd, fileSize);
     const video = tracks.find((t) => t.handler === "vide");
     if (!video) throw new Error("לא נמצא ערוץ וידאו בקובץ");
 
@@ -457,5 +462,122 @@ export function splitMp4(input, outPrefix, maxBytes) {
     return outputs;
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/**
+ * Joins MP4 parts made by splitMp4 (same tracks and codec settings, in order) back into
+ * one file at `output`. Used to rebuild a whole episode from parts downloaded back from
+ * WhatsApp. The first part's track headers are used for the result.
+ */
+export function joinMp4(inputs, output) {
+  const fds = inputs.map((f) => fs.openSync(f, "r"));
+  try {
+    const movies = fds.map((fd) => openMovie(fd, fs.fstatSync(fd).size));
+    const first = movies[0];
+    if (movies.some((m) => m.tracks.length !== first.tracks.length)) throw new Error("החלקים לא תואמים זה לזה");
+
+    // One "virtual" track per track of the first part, with the samples of all parts.
+    const tracks = first.tracks.map((t, ti) => {
+      const all = movies.map((m) => m.tracks[ti]);
+      if (all.some((x) => x.handler !== t.handler || x.timescale !== t.timescale)) throw new Error("החלקים לא תואמים זה לזה");
+      const count = all.reduce((s, x) => s + x.count, 0);
+      const sizes = new Uint32Array(count);
+      const durations = new Uint32Array(count);
+      const dts = new Float64Array(count);
+      const offsets = new Float64Array(count);
+      const src = new Uint16Array(count);
+      const ctts = t.ctts ? new Int32Array(count) : null;
+      const sync = all.some((x) => x.sync) ? new Uint8Array(count) : null;
+      let i = 0;
+      let time = 0;
+      all.forEach((x, pi) => {
+        for (let k = 0; k < x.count; k++, i++) {
+          sizes[i] = x.sizes[k];
+          durations[i] = x.durations[k];
+          dts[i] = time;
+          time += x.durations[k];
+          offsets[i] = x.offsets[k];
+          src[i] = pi;
+          if (ctts) ctts[i] = x.ctts ? x.ctts[k] : 0;
+          if (sync) sync[i] = x.sync ? x.sync[k] : 1;
+        }
+      });
+      return { ...t, count, sizes, durations, dts, offsets, src, ctts, sync };
+    });
+    const ranges = tracks.map((t) => [0, t.count]);
+
+    // Interleave ~0.5s chunks of all tracks in time order (same layout as splitMp4).
+    const chunkList = [];
+    tracks.forEach((t, ti) => {
+      let i = 0;
+      while (i < t.count) {
+        const start = t.dts[i];
+        let j = i;
+        while (j < t.count && t.dts[j] - start < t.timescale / 2) j++;
+        chunkList.push({ ti, from: i, to: j, time: start / t.timescale });
+        i = j;
+      }
+    });
+    chunkList.sort((a, b) => a.time - b.time || a.ti - b.ti);
+    const chunksPerTrack = tracks.map(() => []);
+    let dataOffset = 0;
+    for (const c of chunkList) {
+      const t = tracks[c.ti];
+      chunksPerTrack[c.ti].push({ count: c.to - c.from, dataOffset });
+      for (let i = c.from; i < c.to; i++) dataOffset += t.sizes[i];
+    }
+    const dataSize = dataOffset;
+    if (dataSize + 8 > 0xffffffff) throw new Error("הקובץ המאוחד גדול מדי");
+
+    const { buf, moov, ftyp, movieTimescale } = first;
+    const moov0 = buildMoov(buf, moov, tracks, ranges, chunksPerTrack, movieTimescale, 0);
+    const base = ftyp.length + moov0.length + 8;
+    const moovOut = buildMoov(buf, moov, tracks, ranges, chunksPerTrack, movieTimescale, base);
+
+    const tmp = output + ".part";
+    const out = fs.openSync(tmp, "w");
+    try {
+      fs.writeSync(out, ftyp);
+      fs.writeSync(out, moovOut);
+      const mdatHdr = Buffer.alloc(8);
+      mdatHdr.writeUInt32BE(8 + dataSize);
+      mdatHdr.write("mdat", 4, "latin1");
+      fs.writeSync(out, mdatHdr);
+      const io = Buffer.alloc(4 * 1024 * 1024);
+      let runFd = -1;
+      let runStart = -1;
+      let runLen = 0;
+      const flush = () => {
+        let done = 0;
+        while (done < runLen) {
+          const n = Math.min(io.length, runLen - done);
+          fs.readSync(runFd, io, 0, n, runStart + done);
+          fs.writeSync(out, io, 0, n);
+          done += n;
+        }
+        runLen = 0;
+      };
+      for (const c of chunkList) {
+        const t = tracks[c.ti];
+        for (let i = c.from; i < c.to; i++) {
+          const fd = fds[t.src[i]];
+          if (runLen && fd === runFd && runStart + runLen === t.offsets[i]) runLen += t.sizes[i];
+          else {
+            flush();
+            runFd = fd;
+            runStart = t.offsets[i];
+            runLen = t.sizes[i];
+          }
+        }
+      }
+      flush();
+    } finally {
+      fs.closeSync(out);
+    }
+    fs.renameSync(tmp, output);
+    return output;
+  } finally {
+    fds.forEach((fd) => fs.closeSync(fd));
   }
 }

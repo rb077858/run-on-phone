@@ -260,6 +260,17 @@ export async function syncCustomer(c) {
   if (!s.isLinked()) return addLog(`⏭ ${name}: וואטסאפ לא מחובר, מדלג`);
 
   await s.use(async (sock) => {
+    if (c.resetPending) {
+      // A fresh group was requested (e.g. "reset all groups"): delete the old one first.
+      if (c.groupJid) {
+        const last = c.sent?.at(-1) || c.welcome;
+        await leaveAndDeleteChat(sock, c.groupJid, last?.key, last?.timestamp);
+      }
+      c.groupJid = null;
+      c.resetPending = false;
+      save();
+      addLog(`♻️ ${name}: הקבוצה הישנה נמחקה, נוצרת קבוצה חדשה`);
+    }
     if (!c.groupJid) await createEpisodesGroup(c, sock);
     let meta = await groupMeta(sock, c.groupJid);
     if (!meta) {
@@ -329,7 +340,19 @@ export async function syncCustomer(c) {
         // Not uploaded this way yet: upload fresh, then remove what was there before (old
         // parts, or leftovers of an interrupted send) – in this order, so nothing is lost if
         // the upload fails.
-        await firstUpload(c, s, sock, ep, onSent, undo);
+        try {
+          await firstUpload(c, s, sock, ep, onSent, undo);
+        } catch (e) {
+          // Can't send it the new way (video not on the phone and not on WhatsApp): keep
+          // what the customer has, or send the old way if that upload still exists.
+          const old = ep.media?.key === sourceKey(ep.source) ? ep.media : null;
+          if (!e.noSource || !old) throw e;
+          addLog(`  ⚠ ${e.message}`);
+          const oldHave = new Set(recs.filter((r) => (r.parts || 1) === old.parts.length).map((r) => r.part || 1));
+          const oldMissing = old.parts.map((_, i) => i + 1).filter((p) => !oldHave.has(p));
+          if (oldMissing.length) await sendParts(c, s, sock, ep, oldMissing, onSent, old);
+          continue;
+        }
         await undo(recs);
       }
     }
@@ -427,6 +450,14 @@ export function queueSyncAll() {
 
 export function queueUnblock(c) {
   return enqueue(`unblock:${c.id}`, `ביטול חסימה ${customerName(c)}`, () => unblockCustomer(c));
+}
+
+/** Every active customer gets a new group on their next sync. */
+export function resetAllOnNextSync() {
+  const list = db().customers.filter((c) => c.status !== "blocked");
+  for (const c of list) c.resetPending = true;
+  save();
+  return list.length;
 }
 
 export function queueReset(c) {

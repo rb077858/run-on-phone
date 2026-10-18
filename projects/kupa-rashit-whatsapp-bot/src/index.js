@@ -14,6 +14,7 @@ import {
   queueSyncAll,
   queueUnblock,
   requestResend,
+  resetAllOnNextSync,
 } from "./customers.js";
 import {
   db,
@@ -79,6 +80,7 @@ function customerView(c) {
     lastSync: c.lastSync,
     delivered: deliveredCount(c),
     requests: (c.inbox || []).length,
+    resetPending: !!c.resetPending,
     wa: { state: s.state, linked: s.linked, error: s.error },
   };
 }
@@ -142,7 +144,7 @@ route("PUT", /^\/api\/settings$/, async (req) => {
     st.keepDays = d;
   }
   if (b.reuseUploads != null) st.reuseUploads = !!b.reuseUploads;
-  if (b.bigAs === "document" || b.bigAs === "parts") st.bigAs = b.bigAs;
+  if (b.sendAs === "document" || b.sendAs === "video") st.sendAs = b.sendAs;
   if (b.resetMaxVideo) st.maxVideoBytes = null;
   save();
   return st;
@@ -238,6 +240,11 @@ route("POST", /^\/api\/customers\/([\w-]+)\/resend$/, async (req, [id]) => {
   return { queued: queueSync(c) };
 });
 route("POST", /^\/api\/sync-all$/, () => ({ count: queueSyncAll() }));
+route("POST", /^\/api\/reset-all$/, () => {
+  const count = resetAllOnNextSync();
+  addLog(`♻️ ${count} לקוחות יקבלו קבוצה חדשה בסנכרון הבא`);
+  return { count };
+});
 
 // Episodes
 // Edit season/episode/title without changing the video.
@@ -311,6 +318,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.requestTimeout = 0; // uploads of big videos can take a while
+
+// One time (this version): every customer gets a new group with all episodes as MP4 files.
+if (!settings().resetForFilesDone) {
+  resetAllOnNextSync();
+  settings().resetForFilesDone = true;
+  save();
+}
 
 // Older versions linked a manager WhatsApp account; it is no longer used.
 fs.rmSync(path.join(DATA_DIR, "sessions", "manager"), { recursive: true, force: true });

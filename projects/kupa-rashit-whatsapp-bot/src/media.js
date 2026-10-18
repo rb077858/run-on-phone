@@ -77,10 +77,13 @@ export function episodeFile(source) {
   );
 }
 
+/** Where the episode's full video is kept on the phone (whether or not it is there now). */
+export const sourcePath = (source) =>
+  source.type === "drive" ? path.join(CACHE_DIR, `drive-${source.fileId}.mp4`) : path.join(MEDIA_DIR, source.file);
+
 /** Local path of the episode's full video if it is on the phone right now, else null. */
 export function localSourcePath(source) {
-  const p =
-    source.type === "drive" ? path.join(CACHE_DIR, `drive-${source.fileId}.mp4`) : path.join(MEDIA_DIR, source.file);
+  const p = sourcePath(source);
   return fs.existsSync(p) ? p : null;
 }
 

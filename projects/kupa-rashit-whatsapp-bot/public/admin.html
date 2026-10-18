@@ -188,12 +188,16 @@
         <button class="switch" id="reuse" data-act="reuse"></button>
       </div>
       <div class="set">
-        <div class="txt"><b>פרק גדול מדי לסרטון</b><span id="bigTxt"></span></div>
-        <div class="seg mini"><button data-act="bigAs" data-v="document" id="bigDoc">📄 קובץ שלם</button><button data-act="bigAs" data-v="parts" id="bigParts">🧩 חלקים</button></div>
+        <div class="txt"><b>איך הפרקים נשלחים</b><span id="bigTxt"></span></div>
+        <div class="seg mini"><button data-act="sendAs" data-v="document" id="bigDoc">📄 קובץ MP4</button><button data-act="sendAs" data-v="video" id="bigParts">🎬 סרטון</button></div>
       </div>
       <div class="set">
         <div class="txt"><b>גודל מקסימלי לחלק</b><span id="maxTxt"></span></div>
         <button class="btn sm ghost" data-act="resetMax">איפוס</button>
+      </div>
+      <div class="set">
+        <div class="txt"><b>קבוצה חדשה לכולם</b><span>בסנכרון הבא הקבוצות הקיימות יימחקו, ולכל לקוח תיווצר קבוצה חדשה עם הודעת הפתיחה וכל הפרקים</span></div>
+        <button class="btn sm" data-act="resetAll">♻️ איפוס</button>
       </div>
       <div class="set">
         <div class="txt"><b>אחסון בטלפון</b><span id="diskTxt"></span></div>
@@ -206,7 +210,7 @@
       <h3>🧹 מה עושה "פינוי עכשיו"?</h3>
       <p>מוחק מהטלפון את העותקים של הבוט, אבל רק של פרקים שכבר הועלו לוואטסאפ. פרק שעוד לא הועלה נשאר. הלקוחות לא מושפעים, כי הם מורידים מוואטסאפ. אם יום אחד וואטסאפ תמחק את העותק שלה ומישהו יבקש את הפרק, תתבקש להעלות אותו שוב. אותו דבר קורה אוטומטית אחרי מספר הימים שלמעלה.</p>
       <h3>📥 בקשות מלקוחות</h3>
-      <p>סרטון לא נפתח ללקוח? הוא עושה "השב" לסרטון וכותב משהו, או כותב "עונה 6 פרק 4". בסנכרון הבא ההודעה שלו נמחקת והסרטון נשלח שוב.</p>
+      <p>פרק לא נפתח ללקוח? הוא עושה "השב" על הקובץ וכותב משהו, או כותב "עונה 6 פרק 4". בסנכרון הבא ההודעה שלו נמחקת והסרטון נשלח שוב.</p>
       <h3>🔎 חיפוש בוואטסאפ</h3>
       <p>בכל סרטון כתוב למשל ע6פ4 ו-S06E04, כך שהלקוח מוצא פרק בחיפוש של הקבוצה.</p>
     </div>
@@ -287,6 +291,7 @@ function renderCustomers() {
           ? `<div class="bar"><i style="width:${pct}%"></i></div>
              <div class="row small muted"><span>🎬 ${c.delivered} מתוך ${total} פרקים</span><span class="spacer"></span>
              ${c.requests ? `<span class="chip gold">📥 ${c.requests} בקשות</span>` : ''}
+             ${c.resetPending ? '<span class="chip blue">♻️ קבוצה חדשה בסנכרון</span>' : ''}
              ${c.lastSync ? `<span>${ago(c.lastSync)}</span>` : '<span>עוד לא סונכרן</span>'}</div>`
           : `<div class="muted small" style="margin-top:10px">צריך לחבר את הוואטסאפ של הלקוח כדי לשלוח לו פרקים</div>`}
       ${c.wa.error ? `<div class="err" style="margin-top:6px">${esc(c.wa.error)}</div>` : ''}
@@ -297,7 +302,7 @@ function renderCustomers() {
 
 function epChips(e) {
   const chips = e.type === 'drive' ? ['<span class="chip warn">🔗 ישן מדרייב</span>'] : [];
-  if (e.wholeFile) chips.push('<span class="chip">📄 קובץ שלם</span>');
+  if (e.wholeFile) chips.push('<span class="chip">📄 קובץ MP4</span>');
   if (e.parts > 1) chips.push(`<span class="chip">🧩 ${e.parts} חלקים</span>`);
   if (e.uploaded) chips.push('<span class="chip ok">☁ בוואטסאפ</span>');
   if (e.onPhone) chips.push(`<span class="chip">📱 ${fmt(e.localBytes)}</span>`);
@@ -346,10 +351,10 @@ function renderTop() {
   $('keepDays').textContent = st.keepDays;
   $('keepTxt').textContent = st.keepDays ? `${st.keepDays} ימים אחרי השימוש האחרון` : 'מיד אחרי כל סנכרון';
   $('reuse').classList.toggle('on', !!st.reuseUploads);
-  $('bigDoc').classList.toggle('on', st.bigAs !== 'parts'); $('bigParts').classList.toggle('on', st.bigAs === 'parts');
-  $('bigTxt').textContent = st.bigAs === 'parts'
-    ? 'מחולק לכמה סרטונים שמתנגנים בצ׳אט ("חלק 1 מתוך 3")'
-    : 'נשלח כקובץ MP4 אחד שלם (עד 2GB). הלקוח מוריד אותו ופותח בנגן. פרק שנכנס כסרטון נשלח כסרטון רגיל';
+  $('bigDoc').classList.toggle('on', st.sendAs !== 'video'); $('bigParts').classList.toggle('on', st.sendAs === 'video');
+  $('bigTxt').textContent = st.sendAs === 'video'
+    ? 'סרטון שמתנגן בצ׳אט. פרק גדול מדי מחולק לחלקים ("חלק 1 מתוך 3")'
+    : 'כל פרק כקובץ MP4 אחד שלם, מצורף (עד 2GB), בלי חלקים. הלקוח מוריד ופותח בנגן';
   $('maxTxt').textContent = st.maxVideoBytes ? `וואטסאפ קיבלה חלקים של עד ${fmt(st.maxVideoBytes)}` : 'עוד לא נלמד. ייקבע בהעלאה הראשונה';
   $('diskTxt').textContent = `סה״כ ${fmt(disk)} · סרטונים שהעלית: ${fmt(state.storage.media)} · חלקים: ${fmt(state.storage.cache)}`;
 }
@@ -567,7 +572,8 @@ const actions = {
   addEp: () => episodeForm(null, 'new'),
   keep: (b) => run(api('PUT', '/api/settings', { keepDays: Math.max(0, state.settings.keepDays + Number(b.dataset.d)) })),
   reuse: () => run(api('PUT', '/api/settings', { reuseUploads: !state.settings.reuseUploads })),
-  bigAs: (b) => run(api('PUT', '/api/settings', { bigAs: b.dataset.v }), 'נשמר. פרקים שכבר נשלחו יוחלפו בסנכרון הבא (אם הקובץ עדיין בטלפון)'),
+  sendAs: (b) => run(api('PUT', '/api/settings', { sendAs: b.dataset.v }), 'נשמר. פרקים שכבר נשלחו יוחלפו בסנכרון הבא'),
+  resetAll: () => confirm('בסנכרון הבא, לכל הלקוחות: הקבוצה הקיימת תימחק ותיווצר קבוצה חדשה עם הודעת הפתיחה וכל הפרקים. להמשיך?') && run(api('POST', '/api/reset-all'), (r) => `♻️ ${r.count} לקוחות יקבלו קבוצה חדשה בסנכרון הבא`),
   resetMax: () => run(api('PUT', '/api/settings', { resetMaxVideo: true }), 'אופס. בפעם הבאה ינסה שוב את הגודל המלא'),
   cleanup: () => confirm('למחוק עכשיו מהטלפון את כל הסרטונים שבטוח למחוק?') && run(api('POST', '/api/cleanup'), (r) => `🧹 פונו ${fmt(r.freed)}`),
 };

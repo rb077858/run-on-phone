@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS = {
   keepDays: 3, // delete episode videos from the phone this many days after they were last used
   reuseUploads: true, // upload each video to WhatsApp once and reuse it for all customers
   maxVideoBytes: null, // learned: the part size WhatsApp accepted
-  bigAs: "document", // an episode too big for a video: "document" (one whole MP4 file) or "parts"
+  sendAs: "document", // "document": every episode as one MP4 file; "video": videos (parts if too big)
 };
 
 let data = empty();
@@ -30,6 +30,7 @@ try {
 } catch {}
 
 delete data.manager; // older versions had a manager WhatsApp account
+delete data.settings?.bigAs; // replaced by sendAs
 
 export const db = () => data;
 export const settings = () => Object.assign(data.settings, { ...DEFAULT_SETTINGS, ...data.settings });
