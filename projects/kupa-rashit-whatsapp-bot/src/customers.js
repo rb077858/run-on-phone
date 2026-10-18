@@ -1,11 +1,12 @@
 // Everything done through a customer's own WhatsApp account: creating the
 // "קופה ראשית פרקים" group, syncing episodes into it, and blocking / unblocking.
-import { getContentType, jidNormalizedUser, normalizeMessageContent } from "baileys";
+import { generateMessageIDV2, getContentType, jidNormalizedUser, normalizeMessageContent, proto } from "baileys";
 import {
   BLOCKED_GROUP_NAME,
   BLOCKED_MESSAGE,
   EPISODES_GROUP_DESC,
   EPISODES_GROUP_NAME,
+  WELCOME_MESSAGE,
 } from "./config.js";
 import { db, findEpisode, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
 import { firstUpload, forgetRefChecks, mediaPlan, sendParts } from "./delivery.js";
@@ -66,8 +67,36 @@ async function createEpisodesGroup(c, sock) {
   c.groupDesc = meta?.desc ?? EPISODES_GROUP_DESC; // compare with what WhatsApp actually stored
   c.sent = [];
   c.inbox = [];
+  c.welcome = null;
   save();
+  await sendWelcome(c, sock);
   return jid;
+}
+
+// Texts the bot itself sends in the group. Their echo must not count as a customer request.
+const botTextIds = new Set();
+
+/** The pinned "how this group works / how to ask for a video again" message. */
+async function sendWelcome(c, sock) {
+  const messageId = generateMessageIDV2(sock.user?.id);
+  botTextIds.add(messageId);
+  const msg = await tryDo("welcome", () => sock.sendMessage(c.groupJid, { text: WELCOME_MESSAGE }, { messageId }));
+  if (!msg) return;
+  c.welcome = { key: msg.key, timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000) };
+  save();
+  await pinWelcome(c, sock);
+}
+
+// A pin lasts at most 30 days, so it is renewed on syncs.
+async function pinWelcome(c, sock) {
+  if (!c.welcome) return;
+  const ok = await tryDo("pin", () =>
+    sock.sendMessage(c.groupJid, { pin: c.welcome.key, type: proto.PinInChat.Type.PIN_FOR_ALL, time: 2592000 }),
+  );
+  if (ok) {
+    c.welcome.pinnedAt = Date.now();
+    save();
+  }
 }
 
 const norm = (s) => String(s || "").replace(/\r/g, "").trim();
@@ -122,6 +151,7 @@ const IGNORED_TYPES = new Set([
   "senderKeyDistributionMessage",
   "messageContextInfo",
   "pollUpdateMessage",
+  "pinInChatMessage",
 ]);
 
 function onCustomerMessages(s, { messages }) {
@@ -134,6 +164,7 @@ function onCustomerMessages(s, { messages }) {
     const type = getContentType(content);
     if (!type || IGNORED_TYPES.has(type)) continue;
     c.inbox ??= [];
+    if (botTextIds.has(m.key.id) || m.key.id === c.welcome?.key?.id) continue;
     if (c.inbox.some((x) => x.id === m.key.id) || c.sent?.some((r) => r.key.id === m.key.id)) continue;
     const inner = content[type];
     c.inbox.push({
@@ -237,6 +268,8 @@ export async function syncCustomer(c) {
       save();
     }
 
+    if (c.welcome && Date.now() - (c.welcome.pinnedAt || 0) > 25 * 86400_000) await pinWelcome(c, sock);
+
     await s.waitOfflineMessages();
     await handleInbox(c, sock);
 
@@ -337,6 +370,19 @@ export async function unblockCustomer(c) {
   await syncCustomer(c);
 }
 
+/** Deletes the customer's episodes group and creates a new, empty one (filled on the next sync). */
+export async function resetGroup(c) {
+  const name = customerName(c);
+  await customerSession(c.id).use(async (sock) => {
+    if (c.groupJid) {
+      const last = c.sent?.at(-1) || c.welcome;
+      await leaveAndDeleteChat(sock, c.groupJid, last?.key, last?.timestamp);
+    }
+    await createEpisodesGroup(c, sock);
+    addLog(`♻️ ${name}: הקבוצה אופסה. נוצרה קבוצה חדשה וריקה (הפרקים יישלחו בסנכרון)`);
+  });
+}
+
 // ------------------------------------------------------------------ queue
 export function queueSync(c) {
   return enqueue(`sync:${c.id}`, `סנכרון ${customerName(c)}`, () => syncCustomer(c));
@@ -351,6 +397,10 @@ export function queueSyncAll() {
 
 export function queueUnblock(c) {
   return enqueue(`unblock:${c.id}`, `ביטול חסימה ${customerName(c)}`, () => unblockCustomer(c));
+}
+
+export function queueReset(c) {
+  return enqueue(`reset:${c.id}`, `איפוס הקבוצה של ${customerName(c)}`, () => resetGroup(c));
 }
 
 export function queueLogout(c) {

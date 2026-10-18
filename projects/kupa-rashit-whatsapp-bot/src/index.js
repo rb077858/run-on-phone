@@ -9,6 +9,7 @@ import {
   customerSession,
   deliveredCount,
   queueLogout,
+  queueReset,
   queueSync,
   queueSyncAll,
   queueUnblock,
@@ -222,6 +223,12 @@ route("POST", /^\/api\/customers\/([\w-]+)\/unblock$/, (_req, [id]) => {
   const c = mustCustomer(id);
   if (c.status !== "blocked") throw new Error("הלקוח לא חסום");
   return { queued: queueUnblock(c) };
+});
+route("POST", /^\/api\/customers\/([\w-]+)\/reset$/, (_req, [id]) => {
+  const c = mustCustomer(id);
+  if (c.status === "blocked") throw new Error("הלקוח חסום. בטל קודם את החסימה");
+  if (!customerSession(id).isLinked()) throw new Error("הוואטסאפ של הלקוח לא מחובר");
+  return { queued: queueReset(c) };
 });
 route("POST", /^\/api\/customers\/([\w-]+)\/logout$/, (_req, [id]) => ({ queued: queueLogout(mustCustomer(id)) }));
 route("POST", /^\/api\/customers\/([\w-]+)\/resend$/, async (req, [id]) => {

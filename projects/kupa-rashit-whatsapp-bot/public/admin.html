@@ -423,6 +423,7 @@ function custMenu(id) {
   openSheet(`<h2>${esc(c.name)}</h2>
     ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resendPick" data-id="${id}">📥 שליחה מחדש של פרק</button>` : ''}
     ${!c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="connect" data-id="${id}">📱 חיבור וואטסאפ</button>` : ''}
+    ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resetGroup" data-id="${id}">♻️ איפוס הקבוצה</button>` : ''}
     <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
     ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
     <button class="menu-item red" data-act="delCust" data-id="${id}">🗑 מחיקת לקוח</button>`);
@@ -542,6 +543,7 @@ const actions = {
   editCust: (b) => customerForm(custById(b.dataset.id)),
   resendPick: (b) => resendPick(b.dataset.id),
   resend: (b) => { closeSheet(); run(api('POST', `/api/customers/${b.dataset.id}/resend`, { episodeId: b.dataset.ep }), '📥 יישלח שוב בסנכרון שהתחיל'); },
+  resetGroup: (b) => { const c = custById(b.dataset.id); if (confirm(`לאפס את הקבוצה של ${c.name}?\nהקבוצה הקיימת תימחק אצלו ותיווצר קבוצה חדשה וריקה, עם הודעת הסבר. הפרקים יישלחו שוב בסנכרון.`)) { closeSheet(); run(api('POST', `/api/customers/${c.id}/reset`), '♻️ האיפוס התחיל'); } },
   logout: (b) => { if (confirm('לנתק את הבוט מהוואטסאפ של הלקוח? הקבוצה והפרקים יישארו אצלו.')) { closeSheet(); run(api('POST', `/api/customers/${b.dataset.id}/logout`), 'מנתק…'); } },
   delCust: (b) => { const c = custById(b.dataset.id); if (confirm(`למחוק את ${c.name}? הבוט גם יתנתק מהוואטסאפ שלו.`)) { closeSheet(); run(api('DELETE', `/api/customers/${c.id}`), 'נמחק'); } },
   epMenu: (b) => epMenu(b.dataset.id),
