@@ -41,7 +41,7 @@
   main { padding: 12px 16px; max-width: 760px; margin: 0 auto; }
   .page { display: none; } .page.on { display: block; }
   .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
-  .search { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; color: var(--text); outline: none; }
+  .search { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; color: var(--text); outline: none; }
   .search:focus { border-color: var(--gold); }
 
   /* buttons */
@@ -104,7 +104,6 @@
   nav button .i { font-size: 21px; filter: grayscale(1); opacity: .7; }
   nav button.on { color: var(--gold); } nav button.on .i { filter: none; opacity: 1; }
   nav .dot { position: absolute; top: 4px; left: calc(50% - 18px); background: var(--bad); color: #fff; font-size: 10px; border-radius: 99px; padding: 0 5px; }
-  .fab { position: fixed; left: 18px; bottom: calc(86px + env(safe-area-inset-bottom)); width: 58px; height: 58px; border-radius: 20px; font-size: 28px; background: linear-gradient(135deg, var(--gold), #ffa94d); color: #1d1530; box-shadow: var(--shadow); z-index: 4; display: grid; place-items: center; }
 
   /* sheet */
   .scrim { position: fixed; inset: 0; background: #0009; opacity: 0; pointer-events: none; transition: .2s; z-index: 10; }
@@ -158,12 +157,12 @@
 
 <main>
   <section class="page on" id="p-customers">
-    <div class="toolbar"><input class="search" id="custSearch" placeholder="🔍 חיפוש לקוח"></div>
+    <div class="toolbar"><input class="search" id="custSearch" placeholder="🔍 חיפוש לקוח"><button class="btn gold" data-act="addCust">➕ לקוח</button></div>
     <div id="customers"></div>
   </section>
 
   <section class="page" id="p-episodes">
-    <div class="toolbar"><input class="search" id="epSearch" placeholder="🔍 חיפוש: עונה, פרק או שם"></div>
+    <div class="toolbar"><input class="search" id="epSearch" placeholder="🔍 עונה, פרק או שם"><button class="btn gold" data-act="addEp">➕ פרק</button></div>
     <div id="episodes"></div>
   </section>
 
@@ -201,7 +200,6 @@
   </section>
 </main>
 
-<button class="fab" id="fab" data-act="fab">+</button>
 
 <nav>
   <button class="on" data-tab="customers"><span class="i">👥</span>לקוחות<span class="dot" id="reqDot" hidden></span></button>
@@ -251,7 +249,7 @@ function renderCustomers() {
   const total = state.episodes.length;
   const list = state.customers.filter((c) => !q || c.name.includes(q) || c.phone.includes(q.replace(/\D/g, '') || '§'));
   if (!state.customers.length) {
-    $('customers').innerHTML = `<div class="empty"><div class="big">👥</div><p>אין עדיין לקוחות.<br>לחץ על + כדי להוסיף את הראשון.</p></div>`;
+    $('customers').innerHTML = `<div class="empty"><div class="big">👥</div><p>אין עדיין לקוחות.<br>לחץ על "➕ לקוח" כדי להוסיף את הראשון.</p></div>`;
     return;
   }
   $('customers').innerHTML = list.map((c) => {
@@ -298,7 +296,7 @@ function renderEpisodes() {
   const m = q.match(/(\d+)\D+(\d+)/);
   const list = state.episodes.filter((e) => !q || (m ? e.season == m[1] && e.episode == m[2] : String(e.season) === q || e.title.includes(q)));
   if (!state.episodes.length) {
-    $('episodes').innerHTML = `<div class="empty"><div class="big">🎬</div><p>אין עדיין פרקים.<br>לחץ על + כדי להעלות סרטון מהטלפון.</p></div>`;
+    $('episodes').innerHTML = `<div class="empty"><div class="big">🎬</div><p>אין עדיין פרקים.<br>לחץ על "➕ פרק" כדי להעלות סרטון מהטלפון.</p></div>`;
     return;
   }
   let html = '', season = null;
@@ -531,7 +529,8 @@ const actions = {
   replaceEp: (b) => episodeForm(epById(b.dataset.id), 'replace'),
   reattach: (b) => episodeForm(epById(b.dataset.id), 'reattach'),
   delEp: (b) => { const e = epById(b.dataset.id); if (confirm(`למחוק את עונה ${e.season} פרק ${e.episode}? בסנכרון הבא הוא יימחק גם אצל הלקוחות.`)) { closeSheet(); run(api('DELETE', `/api/episodes/${e.id}`), 'נמחק'); } },
-  fab: () => (tab === 'episodes' ? episodeForm(null, 'new') : customerForm(null)),
+  addCust: () => customerForm(null),
+  addEp: () => episodeForm(null, 'new'),
   keep: (b) => run(api('PUT', '/api/settings', { keepDays: Math.max(0, state.settings.keepDays + Number(b.dataset.d)) })),
   reuse: () => run(api('PUT', '/api/settings', { reuseUploads: !state.settings.reuseUploads })),
   resetMax: () => run(api('PUT', '/api/settings', { resetMaxVideo: true }), 'אופס. בפעם הבאה ינסה שוב את הגודל המלא'),
@@ -546,7 +545,6 @@ document.addEventListener('click', (ev) => {
     tab = t.dataset.tab;
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === t));
     document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === 'p-' + tab));
-    $('fab').hidden = tab === 'log' || tab === 'settings';
     if (tab === 'log') $('log').scrollTop = $('log').scrollHeight;
     try { localStorage.tab = tab; } catch {}
   }

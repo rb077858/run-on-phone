@@ -139,16 +139,34 @@ export function cleanupLocal(episodes, keepDays, force = false) {
       if (files.length) ep.localDeletedAt = Date.now();
     } else files.forEach((f) => keep.add(path.resolve(f)));
   }
-  // Leftovers in the cache that no episode uses (deleted episodes, old split sizes, …).
-  for (const f of fs.readdirSync(CACHE_DIR)) {
-    const p = path.resolve(CACHE_DIR, f);
-    if (keep.has(p) || f.endsWith(".part")) continue;
-    if (f.endsWith(".json")) {
-      if (force || fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
-      continue;
+  // Leftovers no episode uses: deleted or replaced episodes, old split sizes, uploads that
+  // were cut off half-way (".part"). Only files untouched for a while, so a file that is
+  // being uploaded or saved right now is never removed.
+  const used = new Set(keep);
+  for (const ep of episodes) {
+    const p = localSourcePath(ep.source);
+    if (p) used.add(path.resolve(p));
+    for (const f of ep.localFiles || []) used.add(path.resolve(f));
+  }
+  const settled = Date.now() - 30 * 60_000;
+  for (const dir of [CACHE_DIR, MEDIA_DIR]) {
+    for (const f of fs.readdirSync(dir)) {
+      const p = path.resolve(dir, f);
+      if (used.has(p)) continue;
+      let st;
+      try {
+        st = fs.statSync(p);
+      } catch {
+        continue;
+      }
+      if (st.mtimeMs > settled) continue;
+      if (f.endsWith(".json")) {
+        // split index: harmless, removed together with its parts
+        if (force || st.mtimeMs < cutoff) fs.rmSync(p, { force: true });
+        continue;
+      }
+      rm(p);
     }
-    const used = episodes.some((ep) => localSourcePath(ep.source) === p || ep.localFiles?.includes(p));
-    if (!used || force) rm(p);
   }
   return freed;
 }
