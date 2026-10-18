@@ -19,13 +19,15 @@ for (const dir of [DATA_DIR, SESSIONS_DIR, CACHE_DIR, MEDIA_DIR]) fs.mkdirSync(d
 
 export const THUMBNAIL = fs.readFileSync(path.join(APP_DIR, "assets", "thumb.jpg"));
 
-export const MANAGER_GROUP_NAME = "קופה ראשית מנהל";
 export const EPISODES_GROUP_NAME = "קופה ראשית פרקים";
 export const BLOCKED_GROUP_NAME = "נחסמת על ידי ראם בוטים";
 
 export const EPISODES_GROUP_DESC = [
-  "🎬 קופה ראשית – כל הפרקים, לפי הסדר.",
+  "🎬 קופה ראשית – כל הפרקים.",
   "נוצר על ידי ראם בוטים 🤖✨",
+  "",
+  "🔎 לחיפוש פרק: חפשו בקבוצה למשל ע6פ4 (עונה 6 פרק 4).",
+  "📥 סרטון לא נפתח? עשו לו \"השב\" וכתבו משהו, או כתבו \"עונה 6 פרק 4\". הוא יישלח שוב בעדכון הבא.",
   "",
   "⛔ חל איסור מוחלט לצרף אנשים לקבוצה.",
   "⛔ חל איסור מוחלט לערוך את פרטי הקבוצה (שם, תיאור, תמונה) – בתכלית האיסור.",
@@ -42,19 +44,19 @@ export const BLOCKED_MESSAGE = [
   "לביטול החסימה יש לפנות למנהל.",
 ].join("\n");
 
-export const MANAGER_HELP = [
-  "🎬 *קופה ראשית – קבוצת ניהול*",
-  "",
-  "שלח כאן פרק: קישור לדרייב או את קובץ הסרטון עצמו (כסרטון או כקובץ),",
-  "ואני אשאל מה העונה ומה הפרק.",
-  "קיצור: אפשר לכתוב בהודעה/בכיתוב \"עונה 5 פרק 3\".",
-  "",
-  "פקודות:",
-  "• *רשימה* – כל הפרקים",
-  "• *מחק 5 3* – מחיקת עונה 5 פרק 3",
-  "• *סנכרון* – סנכרון כל הלקוחות",
-  "• *ביטול* – ביטול הוספה באמצע",
-  "• *עזרה* – ההודעה הזאת",
-].join("\n");
+const pad = (n) => String(n).padStart(2, "0");
 
-export const episodeCaption = (ep) => `🎬 קופה ראשית · עונה ${ep.season} · פרק ${ep.episode}${ep.title ? `\n${ep.title}` : ""}`;
+/**
+ * Video caption. Includes short search tokens (ע6פ4, S06E04) so customers can find an
+ * episode with WhatsApp's search.
+ */
+export function episodeCaption(ep, part = 1, parts = 1) {
+  return [
+    `🎬 קופה ראשית – עונה ${ep.season} פרק ${ep.episode}`,
+    ep.title || null,
+    parts > 1 ? `🧩 חלק ${part} מתוך ${parts}` : null,
+    `🔎 ע${ep.season}פ${ep.episode} · S${pad(ep.season)}E${pad(ep.episode)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}

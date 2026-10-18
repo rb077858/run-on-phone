@@ -39,3 +39,5 @@ export const jobsStatus = () => ({
   queued: queue.map((j) => j.label),
   log: log.slice(-120),
 });
+
+export const isIdle = () => !current && !queue.length;

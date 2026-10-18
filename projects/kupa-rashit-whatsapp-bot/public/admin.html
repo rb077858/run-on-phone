@@ -2,321 +2,577 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#120f1e">
 <title>קופה ראשית – ניהול</title>
 <style>
-  :root { --bg:#14111f; --card:#1f1a30; --line:#342b4f; --text:#f1eefb; --muted:#a59dc2; --accent:#f6c343; --ok:#4cd28a; --bad:#ff6b6b; --warn:#ffa94d; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
-  header { padding:16px; background:linear-gradient(135deg,#2b1f52,#14111f); border-bottom:1px solid var(--line); }
-  header h1 { margin:0; font-size:20px; }
-  header .sub { color:var(--muted); font-size:13px; }
-  main { padding:12px; max-width:760px; margin:0 auto; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
-  .card h2 { margin:0 0 10px; font-size:17px; display:flex; align-items:center; gap:8px; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .grow { flex:1; min-width:0; }
-  input { width:100%; padding:10px; border-radius:10px; border:1px solid var(--line); background:#151125; color:var(--text); font-size:15px; }
-  input[type=number] { width:80px; }
-  button, .btn { border:0; border-radius:10px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; background:#3a3060; color:var(--text); text-decoration:none; display:inline-block; }
-  button.primary, .btn.primary { background:var(--accent); color:#1b1530; }
-  button.danger { background:#5a2333; color:#ffd6dc; }
-  button.small, .btn.small { padding:6px 10px; font-size:13px; }
-  button:disabled { opacity:.5; }
-  .pill { font-size:12px; padding:2px 8px; border-radius:99px; background:#2c2545; color:var(--muted); white-space:nowrap; }
-  .pill.ok { background:#173b2a; color:var(--ok); } .pill.bad { background:#47202a; color:var(--bad); } .pill.warn { background:#46321a; color:var(--warn); }
-  .item { border-top:1px solid var(--line); padding:10px 0; }
-  .item:first-child { border-top:0; }
-  .muted { color:var(--muted); font-size:13px; }
-  .season { margin:10px 0 2px; font-weight:700; color:var(--accent); }
-  .ep { display:flex; gap:8px; align-items:center; padding:6px 0; border-top:1px dashed var(--line); }
-  .ep .grow { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #log { background:#0e0c17; border-radius:10px; padding:10px; font:12px/1.5 ui-monospace, monospace; max-height:260px; overflow:auto; white-space:pre-wrap; direction:rtl; }
-  .tabs { display:flex; gap:6px; margin-bottom:10px; }
-  .tabs button { flex:1; }
-  .tabs button.on { background:var(--accent); color:#1b1530; }
-  .err { color:var(--bad); font-size:13px; min-height:1em; }
-  dialog { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:14px; width:min(420px, 92vw); }
-  dialog::backdrop { background:#000a; }
-  progress { width:100%; }
+  :root {
+    --bg: #0f0c1a; --bg2: #171327; --card: #1d1830; --card2: #251f3d; --line: #2f2850;
+    --text: #f3f0fc; --muted: #9d95bd; --faint: #6f6891;
+    --gold: #f7c548; --gold2: #ffdb7a; --ok: #3ddc97; --bad: #ff6b81; --warn: #ffb547; --blue: #6cb6ff;
+    --r: 18px; --shadow: 0 10px 30px #0006;
+  }
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Rubik, Arial, sans-serif; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  input { font: inherit; }
+  .muted { color: var(--muted); } .small { font-size: 13px; } .ltr { direction: ltr; unicode-bidi: isolate; }
+
+  /* header */
+  header { padding: 18px 16px 14px; background: radial-gradient(120% 140% at 100% 0%, #3b2a78 0%, #1a1430 55%, var(--bg) 100%); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: linear-gradient(135deg, var(--gold), #ff9f43); box-shadow: 0 6px 18px #f7c54855; }
+  .brand h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+  .brand .sub { font-size: 12px; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+  .stat { background: #ffffff0d; border: 1px solid #ffffff14; border-radius: 14px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 19px; } .stat span { font-size: 12px; color: var(--muted); }
+
+  /* sync bar */
+  .syncbar { margin: 12px 16px 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; display: flex; gap: 12px; align-items: center; }
+  .syncbar .info { flex: 1; min-width: 0; }
+  .syncbar .now { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .syncbar .last { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spin { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); display: inline-block; margin-left: 6px; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  main { padding: 12px 16px; max-width: 760px; margin: 0 auto; }
+  .page { display: none; } .page.on { display: block; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .search { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; color: var(--text); outline: none; }
+  .search:focus { border-color: var(--gold); }
+
+  /* buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; border-radius: 12px; background: var(--card2); font-weight: 600; font-size: 14px; white-space: nowrap; }
+  .btn:active { transform: scale(.97); }
+  .btn.gold { background: linear-gradient(135deg, var(--gold), #ffa94d); color: #1d1530; }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); }
+  .btn.danger { background: #3b1a26; color: #ffb3c0; }
+  .btn.sm { padding: 7px 11px; font-size: 13px; border-radius: 10px; }
+  .btn.block { width: 100%; padding: 13px; }
+  .btn:disabled { opacity: .5; }
+  .icon-btn { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--card2); font-size: 18px; }
+
+  /* cards */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; margin-bottom: 10px; }
+  .cust-top { display: flex; gap: 12px; align-items: center; }
+  .avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; flex: none; background: linear-gradient(135deg, #5b45b8, #8c6bff); }
+  .avatar.blocked { background: linear-gradient(135deg, #7a2236, #c0394f); }
+  .cust-name { font-weight: 700; font-size: 16px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: #ffffff12; color: var(--muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  .chip.ok { background: #3ddc9722; color: var(--ok); } .chip.bad { background: #ff6b8122; color: var(--bad); }
+  .chip.warn { background: #ffb54722; color: var(--warn); } .chip.blue { background: #6cb6ff22; color: var(--blue); }
+  .chip.gold { background: #f7c54822; color: var(--gold); }
+  .bar { height: 8px; background: #ffffff10; border-radius: 99px; overflow: hidden; margin: 12px 0 6px; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, #8c6bff, var(--gold)); border-radius: 99px; transition: width .4s; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .actions .btn:first-child { flex: 1; }
+  .err { color: var(--bad); font-size: 13px; }
+
+  /* episodes */
+  .season { margin: 14px 0 8px; display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--gold); }
+  .season small { color: var(--muted); font-weight: 400; }
+  .ep { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; }
+  .ep-num { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; background: var(--card2); flex: none; font-size: 15px; }
+  .ep-body { flex: 1; min-width: 0; }
+  .ep-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ep-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
+
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty .big { font-size: 42px; }
+
+  #log { background: #0a0814; border: 1px solid var(--line); border-radius: var(--r); padding: 12px; font: 12px/1.6 ui-monospace, Menlo, monospace; white-space: pre-wrap; min-height: 50vh; max-height: 70vh; overflow: auto; }
+
+  /* settings */
+  .set { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .set:first-of-type { border-top: 0; }
+  .set .txt { flex: 1; } .set .txt b { display: block; } .set .txt span { font-size: 13px; color: var(--muted); }
+  .stepper { display: flex; align-items: center; gap: 6px; }
+  .stepper b { min-width: 28px; text-align: center; font-size: 17px; }
+  .switch { width: 50px; height: 30px; border-radius: 99px; background: #ffffff1c; position: relative; transition: .2s; flex: none; }
+  .switch::after { content: ""; position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: .2s; }
+  .switch.on { background: var(--ok); } .switch.on::after { right: 23px; }
+  .help h3 { margin: 0 0 6px; font-size: 15px; } .help p { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+
+  /* tab bar */
+  nav { position: fixed; bottom: 0; left: 0; right: 0; background: #130f22ee; backdrop-filter: blur(12px); border-top: 1px solid var(--line); display: flex; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); z-index: 5; }
+  nav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border-radius: 12px; color: var(--faint); font-size: 12px; position: relative; }
+  nav button .i { font-size: 21px; filter: grayscale(1); opacity: .7; }
+  nav button.on { color: var(--gold); } nav button.on .i { filter: none; opacity: 1; }
+  nav .dot { position: absolute; top: 4px; left: calc(50% - 18px); background: var(--bad); color: #fff; font-size: 10px; border-radius: 99px; padding: 0 5px; }
+  .fab { position: fixed; left: 18px; bottom: calc(86px + env(safe-area-inset-bottom)); width: 58px; height: 58px; border-radius: 20px; font-size: 28px; background: linear-gradient(135deg, var(--gold), #ffa94d); color: #1d1530; box-shadow: var(--shadow); z-index: 4; display: grid; place-items: center; }
+
+  /* sheet */
+  .scrim { position: fixed; inset: 0; background: #0009; opacity: 0; pointer-events: none; transition: .2s; z-index: 10; }
+  .scrim.on { opacity: 1; pointer-events: auto; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 92vh; overflow: auto; background: var(--bg2); border-radius: 24px 24px 0 0; border-top: 1px solid var(--line); padding: 10px 18px calc(22px + env(safe-area-inset-bottom)); transform: translateY(105%); transition: transform .25s ease; z-index: 11; max-width: 760px; margin: 0 auto; }
+  .sheet.on { transform: none; }
+  .sheet .close { position: absolute; top: 12px; left: 14px; width: 34px; height: 34px; font-size: 15px; }
+  .grip { width: 44px; height: 5px; border-radius: 9px; background: #ffffff2a; margin: 0 auto 12px; }
+  .sheet h2 { margin: 0 0 14px; font-size: 19px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+  .field input { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text); outline: none; }
+  .field input:focus { border-color: var(--gold); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--card); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+  .seg button { padding: 9px; border-radius: 9px; font-weight: 600; color: var(--muted); }
+  .seg button.on { background: var(--card2); color: var(--text); }
+  .filepick { display: block; border: 2px dashed var(--line); border-radius: 14px; padding: 18px; text-align: center; color: var(--muted); }
+  .filepick b { color: var(--text); }
+  .menu-item { display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 6px; border-top: 1px solid var(--line); font-size: 16px; text-align: right; }
+  .menu-item:first-of-type { border-top: 0; }
+  .menu-item.red { color: var(--bad); }
+  .qr { background: #fff; border-radius: 16px; padding: 10px; width: 260px; max-width: 80vw; display: block; margin: 0 auto; }
+  .pair { font: 800 30px/1.2 ui-monospace, monospace; letter-spacing: 4px; color: var(--gold); direction: ltr; text-align: center; margin: 10px 0; }
+  .steps { margin: 10px 0; padding-right: 18px; color: var(--muted); font-size: 14px; }
+  progress { width: 100%; height: 8px; accent-color: var(--gold); }
+  .pick-list { max-height: 50vh; overflow: auto; }
+
+  .toast { position: fixed; top: 14px; left: 50%; transform: translate(-50%, -150%); background: var(--card2); border: 1px solid var(--line); padding: 11px 16px; border-radius: 14px; box-shadow: var(--shadow); z-index: 20; transition: .25s; max-width: 90vw; font-weight: 600; }
+  .toast.on { transform: translate(-50%, 0); }
+  .toast.bad { border-color: var(--bad); color: #ffc2cc; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🎬 קופה ראשית – ממשק ניהול</h1>
-  <div class="sub">ראם בוטים 🤖</div>
+  <div class="brand">
+    <div class="logo">🎬</div>
+    <div><h1>קופה ראשית</h1><div class="sub">ממשק ניהול · ראם בוטים 🤖</div></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="stCust">0</b><span>לקוחות</span></div>
+    <div class="stat"><b id="stEps">0</b><span>פרקים</span></div>
+    <div class="stat"><b id="stDisk">0</b><span>בטלפון</span></div>
+  </div>
 </header>
+
+<div class="syncbar">
+  <div class="info"><div class="now" id="jobNow">מוכן</div><div class="last" id="jobLast"></div></div>
+  <button class="btn gold" data-act="syncAll">🔄 סנכרון לכולם</button>
+</div>
+
 <main>
-  <section class="card">
-    <h2>👑 וואטסאפ מנהל</h2>
-    <div class="row">
-      <div class="grow" id="mgr">…</div>
-      <a class="btn small" href="/qr">חיבור / ניהול</a>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>🔄 סנכרון</h2>
-    <div class="row">
-      <button class="primary" onclick="api('POST','/api/sync-all').then(r=>toast(r.count?`סנכרון של ${r.count} לקוחות התחיל`:'אין לקוחות מחוברים'))">סנכרון כל הלקוחות</button>
-      <div class="grow muted" id="job"></div>
-    </div>
-    <div class="muted" style="margin-top:6px">כשהסנכרון מסתיים אפשר לעצור את הבוט מהאפליקציה.</div>
-  </section>
-
-  <section class="card">
-    <h2>👥 לקוחות <span class="pill" id="custCount">0</span></h2>
-    <form id="addCust" class="row" onsubmit="addCustomer(event)">
-      <input class="grow" name="firstName" placeholder="שם פרטי" required style="min-width:110px">
-      <input class="grow" name="lastName" placeholder="שם משפחה" style="min-width:110px">
-      <input class="grow" name="phone" placeholder="טלפון (050…)" inputmode="tel" required style="min-width:140px">
-      <button class="primary">הוספה</button>
-    </form>
-    <div class="err" id="custErr"></div>
+  <section class="page on" id="p-customers">
+    <div class="toolbar"><input class="search" id="custSearch" placeholder="🔍 חיפוש לקוח"></div>
     <div id="customers"></div>
   </section>
 
-  <section class="card">
-    <h2>📺 פרקים <span class="pill" id="epCount">0</span></h2>
-    <div class="tabs">
-      <button id="tabLink" class="on" onclick="tab('link')">קישור לדרייב</button>
-      <button id="tabFile" onclick="tab('file')">קובץ סרטון</button>
-    </div>
-    <form id="addEp" onsubmit="addEpisode(event)">
-      <div class="row">
-        <input type="number" name="season" placeholder="עונה" min="0" required>
-        <input type="number" name="episode" placeholder="פרק" min="0" required>
-        <input class="grow" name="title" placeholder="כותרת (לא חובה)">
-      </div>
-      <div class="row" style="margin-top:8px">
-        <input class="grow" name="link" id="linkInput" placeholder="https://drive.google.com/file/d/…" inputmode="url">
-        <input class="grow" type="file" name="file" id="fileInput" accept="video/*" style="display:none">
-        <button class="primary">שמירה</button>
-      </div>
-      <progress id="upProg" max="1" value="0" style="display:none"></progress>
-    </form>
-    <div class="err" id="epErr"></div>
-    <div class="muted">אפשר גם לשלוח פרקים בקבוצה "קופה ראשית מנהל" (קישור או סרטון). קבצי דרייב צריכים שיתוף "כל מי שיש לו את הקישור".</div>
+  <section class="page" id="p-episodes">
+    <div class="toolbar"><input class="search" id="epSearch" placeholder="🔍 חיפוש: עונה, פרק או שם"></div>
     <div id="episodes"></div>
-    <div class="row muted" style="margin-top:10px">
-      <span class="grow" id="storage"></span>
-      <button class="small" onclick="if(confirm('למחוק את הסרטונים שהורדו מדרייב? הם יירדו שוב בסנכרון הבא.'))api('POST','/api/cache/clear').then(load)">ניקוי מטמון דרייב</button>
-    </div>
   </section>
 
-  <section class="card">
-    <h2>📜 יומן</h2>
-    <div id="log"></div>
+  <section class="page" id="p-log"><div id="log"></div></section>
+
+  <section class="page" id="p-settings">
+    <div class="card">
+      <div class="set">
+        <div class="txt"><b>מחיקת סרטונים מהטלפון</b><span id="keepTxt"></span></div>
+        <div class="stepper"><button class="icon-btn" data-act="keep" data-d="1">+</button><b id="keepDays">3</b><button class="icon-btn" data-act="keep" data-d="-1">−</button></div>
+      </div>
+      <div class="set">
+        <div class="txt"><b>העלאה אחת לכל הלקוחות</b><span>סרטון שכבר הועלה לוואטסאפ נשלח לשאר הלקוחות בלי להעלות שוב</span></div>
+        <button class="switch" id="reuse" data-act="reuse"></button>
+      </div>
+      <div class="set">
+        <div class="txt"><b>גודל מקסימלי לחלק</b><span id="maxTxt"></span></div>
+        <button class="btn sm ghost" data-act="resetMax">איפוס</button>
+      </div>
+      <div class="set">
+        <div class="txt"><b>אחסון בטלפון</b><span id="diskTxt"></span></div>
+        <button class="btn sm" data-act="cleanup">🧹 פינוי עכשיו</button>
+      </div>
+    </div>
+    <div class="card help">
+      <h3>📤 לאן הסרטונים הולכים?</h3>
+      <p>הסרטון יורד לטלפון שלך (מדרייב או מהעלאה), מוצפן ומועלה לשרתים של וואטסאפ. בקבוצה של הלקוח נשלחת הודעה עם המפתח לפענוח, והטלפון שלו מוריד את הסרטון משם.</p>
+      <h3>🧹 למה מותר למחוק מהטלפון?</h3>
+      <p>הלקוח מוריד מהשרתים של וואטסאפ, לא מהטלפון שלך. הקובץ אצלך נחוץ רק כדי להעלות שוב, אם וואטסאפ כבר מחקה אותו. סרטון מדרייב יירד שוב לבד. סרטון שהעלית מהטלפון יימחק רק אחרי שהועלה, ואם יצטרכו אותו שוב תתבקש להעלות אותו מחדש.</p>
+      <h3>📥 בקשות מלקוחות</h3>
+      <p>סרטון לא נפתח ללקוח? הוא עושה "השב" לסרטון וכותב משהו, או כותב "עונה 6 פרק 4". בסנכרון הבא ההודעה שלו נמחקת והסרטון נשלח שוב.</p>
+      <h3>🔎 חיפוש בוואטסאפ</h3>
+      <p>בכל סרטון כתוב למשל ע6פ4 ו-S06E04, כך שהלקוח מוצא פרק בחיפוש של הקבוצה.</p>
+    </div>
   </section>
 </main>
 
-<dialog id="editCust">
-  <form method="dialog" onsubmit="saveCustomer(event)">
-    <h3 style="margin-top:0">עריכת לקוח</h3>
-    <input type="hidden" name="id">
-    <p><input name="firstName" placeholder="שם פרטי" required></p>
-    <p><input name="lastName" placeholder="שם משפחה"></p>
-    <p><input name="phone" placeholder="טלפון" required inputmode="tel"></p>
-    <div class="err" id="editCustErr"></div>
-    <div class="row"><button class="primary">שמירה</button><button type="button" onclick="editCust.close()">ביטול</button></div>
-  </form>
-</dialog>
+<button class="fab" id="fab" data-act="fab">+</button>
 
-<dialog id="editEp">
-  <form method="dialog" onsubmit="saveEpisode(event)">
-    <h3 style="margin-top:0">עריכת פרק</h3>
-    <input type="hidden" name="id">
-    <div class="row"><input type="number" name="season" placeholder="עונה" required><input type="number" name="episode" placeholder="פרק" required></div>
-    <p><input name="title" placeholder="כותרת"></p>
-    <p><input name="link" placeholder="קישור חדש לדרייב (ריק = בלי שינוי בסרטון)"></p>
-    <div class="err" id="editEpErr"></div>
-    <div class="row"><button class="primary">שמירה</button><button type="button" onclick="editEp.close()">ביטול</button></div>
-  </form>
-</dialog>
+<nav>
+  <button class="on" data-tab="customers"><span class="i">👥</span>לקוחות<span class="dot" id="reqDot" hidden></span></button>
+  <button data-tab="episodes"><span class="i">🎬</span>פרקים</button>
+  <button data-tab="log"><span class="i">📜</span>יומן</button>
+  <button data-tab="settings"><span class="i">⚙️</span>הגדרות</button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet"><div class="grip"></div><button class="icon-btn close" id="sheetClose" aria-label="סגירה">✕</button><div id="sheetBody"></div></div>
+<div class="toast" id="toast"></div>
 
 <script>
-let state = null;
-let lastRaw = '';
-let mode = 'link';
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-const fmt = (n) => n >= 1<<30 ? (n/(1<<30)).toFixed(2)+'GB' : n >= 1<<20 ? (n/(1<<20)).toFixed(1)+'MB' : Math.round(n/1024)+'KB';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (n) => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + 'GB' : n >= 1 << 20 ? Math.round(n / (1 << 20)) + 'MB' : Math.round((n || 0) / 1024) + 'KB';
+const ago = (t) => { if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'עכשיו' : m < 60 ? `לפני ${m} דק׳` : m < 1440 ? `לפני ${Math.round(m / 60)} שע׳` : `לפני ${Math.round(m / 1440)} ימים`; };
+const initials = (n) => n.split(/\s+/).map((w) => w[0]).join('').slice(0, 2);
 
+let state = null, lastRaw = '', tab = 'customers', sheetTimer = null;
+
+// ---------------------------------------------------------------- api
 async function api(method, url, body) {
   const r = await fetch(url, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || 'שגיאה');
-  setTimeout(load, 300);
+  setTimeout(load, 250);
   return data;
 }
-const toast = (m) => { $('job').textContent = m; };
-const formData = (f) => Object.fromEntries(new FormData(f));
+function toast(msg, bad) {
+  const t = $('toast'); t.textContent = msg; t.className = 'toast on' + (bad ? ' bad' : '');
+  clearTimeout(t._h); t._h = setTimeout(() => (t.className = 'toast'), 2600);
+}
+const run = (p, ok) => p.then((r) => { if (ok) toast(typeof ok === 'function' ? ok(r) : ok); return r; }).catch((e) => toast(e.message, true));
 
-function waPill(c) {
-  if (c.status === 'blocked') return '<span class="pill bad">⛔ חסום</span>';
-  if (c.wa.state === 'open') return '<span class="pill ok">● מחובר עכשיו</span>';
-  if (c.wa.linked) return '<span class="pill ok">✓ וואטסאפ מקושר</span>';
-  if (c.wa.state === 'qr' || c.wa.state === 'connecting') return '<span class="pill warn">ממתין לחיבור</span>';
-  return '<span class="pill">לא מחובר</span>';
+// ---------------------------------------------------------------- render
+function custStatus(c) {
+  if (c.status === 'blocked') return '<span class="chip bad">⛔ חסום</span>';
+  if (c.wa.state === 'open') return '<span class="chip ok">● מחובר עכשיו</span>';
+  if (c.wa.linked) return '<span class="chip ok">✓ וואטסאפ מחובר</span>';
+  if (c.wa.state === 'qr' || c.wa.state === 'connecting') return '<span class="chip warn">ממתין לחיבור</span>';
+  return '<span class="chip">לא מחובר</span>';
 }
 
 function renderCustomers() {
+  const q = $('custSearch').value.trim();
   const total = state.episodes.length;
-  $('custCount').textContent = state.customers.length;
-  $('customers').innerHTML = state.customers.map((c) => `
-    <div class="item">
-      <div class="row">
-        <div class="grow"><b>${esc(c.name)}</b> <span class="muted" dir="ltr">+${esc(c.phone)}</span></div>
-        ${waPill(c)}
+  const list = state.customers.filter((c) => !q || c.name.includes(q) || c.phone.includes(q.replace(/\D/g, '') || '§'));
+  if (!state.customers.length) {
+    $('customers').innerHTML = `<div class="empty"><div class="big">👥</div><p>אין עדיין לקוחות.<br>לחץ על + כדי להוסיף את הראשון.</p></div>`;
+    return;
+  }
+  $('customers').innerHTML = list.map((c) => {
+    const pct = total ? Math.round((c.delivered / total) * 100) : 0;
+    const main = c.status === 'blocked'
+      ? `<button class="btn gold sm" data-act="unblock" data-id="${c.id}">ביטול חסימה</button>`
+      : c.wa.linked
+        ? `<button class="btn gold sm" data-act="sync" data-id="${c.id}">🔄 סנכרון</button>`
+        : `<button class="btn gold sm" data-act="connect" data-id="${c.id}">📱 חיבור וואטסאפ</button>`;
+    return `<div class="card">
+      <div class="cust-top">
+        <div class="avatar ${c.status === 'blocked' ? 'blocked' : ''}">${esc(initials(c.name))}</div>
+        <div style="flex:1;min-width:0">
+          <div class="cust-name">${esc(c.name)}</div>
+          <div class="muted small ltr" style="text-align:right">+${esc(c.phone)}</div>
+        </div>
+        ${custStatus(c)}
       </div>
-      <div class="muted">
-        ${c.status === 'blocked' ? `נחסם: ${esc(c.blockedReason)}` : c.wa.linked ? `בקבוצה: ${c.sentCount}/${total} פרקים${c.lastSync ? ` · סנכרון אחרון ${new Date(c.lastSync).toLocaleString('he-IL')}` : ''}` : 'צריך לחבר את הוואטסאפ של הלקוח'}
-        ${c.wa.error ? `<div class="err">${esc(c.wa.error)}</div>` : ''}
-      </div>
-      <div class="row" style="margin-top:6px">
-        ${c.status === 'blocked'
-          ? `<button class="small primary" onclick="act('${c.id}','unblock','לבטל את החסימה? קבוצת החסימה תימחק וקבוצת פרקים חדשה תיווצר.')">ביטול חסימה</button>`
-          : c.wa.linked
-            ? `<button class="small primary" onclick="act('${c.id}','sync')">סנכרון</button>`
-            : `<a class="btn small primary" href="/connect/${c.id}">חיבור וואטסאפ לקוח</a>`}
-        <button class="small" onclick="openEditCust('${c.id}')">עריכה</button>
-        ${c.wa.linked ? `<button class="small" onclick="act('${c.id}','logout','לנתק את הבוט מהוואטסאפ של הלקוח?')">ניתוק</button>` : ''}
-        <button class="small danger" onclick="delCust('${c.id}')">מחיקה</button>
-      </div>
-    </div>`).join('') || '<div class="muted">אין עדיין לקוחות.</div>';
+      ${c.status === 'blocked'
+        ? `<div class="err" style="margin-top:10px">נחסם: ${esc(c.blockedReason || '')}</div>`
+        : c.wa.linked
+          ? `<div class="bar"><i style="width:${pct}%"></i></div>
+             <div class="row small muted"><span>🎬 ${c.delivered} מתוך ${total} פרקים</span><span class="spacer"></span>
+             ${c.requests ? `<span class="chip gold">📥 ${c.requests} בקשות</span>` : ''}
+             ${c.lastSync ? `<span>${ago(c.lastSync)}</span>` : '<span>עוד לא סונכרן</span>'}</div>`
+          : `<div class="muted small" style="margin-top:10px">צריך לחבר את הוואטסאפ של הלקוח כדי לשלוח לו פרקים</div>`}
+      ${c.wa.error ? `<div class="err" style="margin-top:6px">${esc(c.wa.error)}</div>` : ''}
+      <div class="actions">${main}<button class="icon-btn" data-act="custMenu" data-id="${c.id}">⋯</button></div>
+    </div>`;
+  }).join('') || '<div class="empty">לא נמצאו לקוחות</div>';
+}
+
+function epChips(e) {
+  const chips = [e.type === 'drive' ? '<span class="chip blue">🔗 דרייב</span>' : '<span class="chip">📁 קובץ</span>'];
+  if (e.parts > 1) chips.push(`<span class="chip">🧩 ${e.parts} חלקים</span>`);
+  if (e.uploaded) chips.push('<span class="chip ok">☁ בוואטסאפ</span>');
+  if (e.onPhone) chips.push(`<span class="chip">📱 ${fmt(e.localBytes)}</span>`);
+  else if (e.fileGone) chips.push('<span class="chip warn">נמחק מהטלפון</span>');
+  return chips.join('');
 }
 
 function renderEpisodes() {
-  $('epCount').textContent = state.episodes.length;
+  const q = $('epSearch').value.trim();
+  const m = q.match(/(\d+)\D+(\d+)/);
+  const list = state.episodes.filter((e) => !q || (m ? e.season == m[1] && e.episode == m[2] : String(e.season) === q || e.title.includes(q)));
+  if (!state.episodes.length) {
+    $('episodes').innerHTML = `<div class="empty"><div class="big">🎬</div><p>אין עדיין פרקים.<br>לחץ על + כדי להוסיף פרק מקישור לדרייב או מקובץ.</p></div>`;
+    return;
+  }
   let html = '', season = null;
-  for (const e of state.episodes) {
-    if (e.season !== season) { season = e.season; html += `<div class="season">עונה ${season}</div>`; }
+  for (const e of list) {
+    if (e.season !== season) {
+      season = e.season;
+      html += `<div class="season">עונה ${season} <small>${state.episodes.filter((x) => x.season === season).length} פרקים</small></div>`;
+    }
     html += `<div class="ep">
-      <span>${e.source.type === 'drive' ? '🔗' : '📁'}</span>
-      <div class="grow">פרק ${e.episode}${e.title ? ' – ' + esc(e.title) : ''}
-        ${e.link ? `<a class="muted" href="${esc(e.link)}" target="_blank">דרייב</a>` : ''}</div>
-      <button class="small" onclick="openEditEp('${e.id}')">עריכה</button>
-      <button class="small danger" onclick="delEp('${e.id}')">🗑</button>
+      <div class="ep-num">${e.episode}</div>
+      <div class="ep-body"><div class="ep-title">פרק ${e.episode}${e.title ? ' · ' + esc(e.title) : ''}</div><div class="ep-chips">${epChips(e)}</div></div>
+      <button class="icon-btn" data-act="epMenu" data-id="${e.id}">⋯</button>
     </div>`;
   }
-  $('episodes').innerHTML = html || '<div class="muted" style="margin-top:8px">אין עדיין פרקים.</div>';
-  $('storage').textContent = `אחסון: דרייב ${fmt(state.storage.cache)} · קבצים ${fmt(state.storage.media)}`;
+  $('episodes').innerHTML = html || '<div class="empty">לא נמצאו פרקים</div>';
 }
 
-function renderStatus() {
-  const m = state.manager;
-  $('mgr').innerHTML = m.state === 'open'
-    ? `<span class="pill ok">● מחובר</span> <span dir="ltr">+${esc(m.number)}</span> ${m.groupJid ? '<div class="muted">קבוצת "קופה ראשית מנהל" פעילה</div>' : ''}`
-    : m.linked ? '<span class="pill warn">מתחבר…</span>' : '<span class="pill bad">לא מחובר – לחץ "חיבור"</span>';
+function renderTop() {
+  const disk = state.storage.cache + state.storage.media;
+  $('stCust').textContent = state.customers.length;
+  $('stEps').textContent = state.episodes.length;
+  $('stDisk').textContent = fmt(disk);
   const j = state.jobs;
-  $('job').textContent = j.current ? `⏳ ${j.current}${j.queued.length ? ` (+${j.queued.length} בתור)` : ''}` : 'אין פעולות פעילות';
+  $('jobNow').innerHTML = j.current ? `<span class="spin"></span>${esc(j.current)}${j.queued.length ? ` <span class="muted small">(+${j.queued.length} בתור)</span>` : ''}` : '✅ מוכן';
+  $('jobLast').textContent = j.current ? (j.log.at(-1) || '').replace(/^\S+\s+/, '') : 'כשמסיימים לסנכרן אפשר לעצור את הבוט מהאפליקציה';
+  const reqs = state.customers.reduce((s, c) => s + c.requests, 0);
+  $('reqDot').hidden = !reqs; $('reqDot').textContent = reqs;
   const log = $('log');
-  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
   log.textContent = j.log.join('\n') || 'אין עדיין רשומות.';
   if (atBottom) log.scrollTop = log.scrollHeight;
+  const st = state.settings;
+  $('keepDays').textContent = st.keepDays;
+  $('keepTxt').textContent = st.keepDays ? `${st.keepDays} ימים אחרי השימוש האחרון` : 'מיד אחרי כל סנכרון';
+  $('reuse').classList.toggle('on', !!st.reuseUploads);
+  $('maxTxt').textContent = st.maxVideoBytes ? `וואטסאפ קיבלה חלקים של עד ${fmt(st.maxVideoBytes)}` : 'עוד לא נלמד. ייקבע בהעלאה הראשונה';
+  $('diskTxt').textContent = `סה״כ ${fmt(disk)} · מדרייב וחלקים: ${fmt(state.storage.cache)} · קבצים שהעלית: ${fmt(state.storage.media)}`;
 }
 
 async function load() {
   try {
     const raw = await (await fetch('/api/state')).text();
-    if (raw === lastRaw) return; // don't redraw buttons under the finger for nothing
+    if (raw === lastRaw) return;
     lastRaw = raw;
     state = JSON.parse(raw);
-    renderStatus(); renderCustomers(); renderEpisodes();
+    renderTop(); renderCustomers(); renderEpisodes();
   } catch {}
 }
 
-async function act(id, what, question) {
-  if (question && !confirm(question)) return;
-  try { const r = await api('POST', `/api/customers/${id}/${what}`); if (r.queued === false) toast('כבר בתור'); }
-  catch (e) { alert(e.message); }
+// ---------------------------------------------------------------- sheet
+function openSheet(html, onClose) {
+  $('sheetBody').innerHTML = html;
+  $('sheet').classList.add('on'); $('scrim').classList.add('on');
+  $('sheet')._onClose = onClose;
+  const first = $('sheet').querySelector('input:not([type=hidden]):not([type=file])');
+  if (first && !('ontouchstart' in window)) setTimeout(() => first.focus(), 250);
+}
+function closeSheet() {
+  $('sheet').classList.remove('on'); $('scrim').classList.remove('on');
+  clearInterval(sheetTimer); sheetTimer = null;
+  $('sheet')._onClose?.(); $('sheet')._onClose = null;
+}
+$('scrim').onclick = closeSheet;
+$('sheetClose').onclick = closeSheet;
+
+const custById = (id) => state.customers.find((c) => c.id === id);
+const epById = (id) => state.episodes.find((e) => e.id === id);
+
+function customerForm(c) {
+  openSheet(`<h2>${c ? 'עריכת לקוח' : 'לקוח חדש'}</h2>
+    <form id="custForm">
+      <div class="two">
+        <div class="field"><label>שם פרטי</label><input name="firstName" required value="${esc(c?.firstName)}"></div>
+        <div class="field"><label>שם משפחה</label><input name="lastName" value="${esc(c?.lastName)}"></div>
+      </div>
+      <div class="field"><label>מספר טלפון (הוואטסאפ של הלקוח)</label><input name="phone" required inputmode="tel" placeholder="050-1234567" class="ltr" value="${c ? '+' + esc(c.phone) : ''}"></div>
+      <div class="err" id="formErr"></div>
+      <button class="btn gold block">${c ? 'שמירה' : 'הוספה'}</button>
+    </form>`);
+  $('custForm').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = Object.fromEntries(new FormData(ev.target));
+    try {
+      const r = c ? await api('PUT', `/api/customers/${c.id}`, d) : await api('POST', '/api/customers', d);
+      closeSheet();
+      toast(c ? 'נשמר ✓' : 'הלקוח נוסף ✓');
+      if (!c) setTimeout(() => connectSheet(r.id), 400);
+    } catch (e) { $('formErr').textContent = e.message; }
+  };
 }
 
-async function addCustomer(ev) {
-  ev.preventDefault();
-  $('custErr').textContent = '';
-  try { await api('POST', '/api/customers', formData(ev.target)); ev.target.reset(); }
-  catch (e) { $('custErr').textContent = e.message; }
-}
-
-function openEditCust(id) {
-  const c = state.customers.find((x) => x.id === id), f = editCust.querySelector('form');
-  f.id.value = c.id; f.firstName.value = c.firstName; f.lastName.value = c.lastName; f.phone.value = '+' + c.phone;
-  $('editCustErr').textContent = '';
-  editCust.showModal();
-}
-async function saveCustomer(ev) {
-  ev.preventDefault();
-  const d = formData(ev.target);
-  try { await api('PUT', `/api/customers/${d.id}`, d); editCust.close(); }
-  catch (e) { $('editCustErr').textContent = e.message; }
-}
-function delCust(id) {
-  const c = state.customers.find((x) => x.id === id);
-  if (confirm(`למחוק את ${c.name}? הבוט גם יתנתק מהוואטסאפ שלו.`)) api('DELETE', `/api/customers/${id}`).catch((e) => alert(e.message));
-}
-
-function tab(m) {
-  mode = m;
-  $('tabLink').classList.toggle('on', m === 'link'); $('tabFile').classList.toggle('on', m === 'file');
-  $('linkInput').style.display = m === 'link' ? '' : 'none';
-  $('fileInput').style.display = m === 'file' ? '' : 'none';
-}
-
-async function addEpisode(ev) {
-  ev.preventDefault();
-  const f = ev.target, d = formData(f);
-  $('epErr').textContent = '';
-  if (state.episodes.some((e) => e.season == d.season && e.episode == d.episode) &&
-      !confirm(`עונה ${d.season} פרק ${d.episode} כבר קיים. להחליף את הסרטון?`)) return;
-  try {
-    if (mode === 'link') {
-      await api('POST', '/api/episodes', d);
+function connectSheet(id) {
+  const c = custById(id) || { name: '' };
+  openSheet(`<h2>📱 חיבור הוואטסאפ של ${esc(c.name)}</h2><div id="waBox" class="muted">מכין קוד…</div>`);
+  fetch(`/api/customers/${id}/wa/start`, { method: 'POST' });
+  let done = false;
+  const tick = async () => {
+    let s;
+    try { s = await (await fetch(`/api/customers/${id}/wa`)).json(); } catch { return; }
+    const box = $('waBox'); if (!box) return;
+    const err = s.error ? `<div class="err" style="margin-top:8px">${esc(s.error)}</div>` : '';
+    if (s.state === 'open') {
+      box.innerHTML = `<div class="empty" style="padding:20px"><div class="big">✅</div><b>מחובר!</b><p>הקבוצה "קופה ראשית פרקים" נוצרה אצל הלקוח. עכשיו אפשר לסנכרן.</p></div>${err}`;
+      if (!done) { done = true; load(); }
+    } else if (s.state === 'qr') {
+      box.innerHTML = `<img class="qr" src="${s.qr}" alt="QR">
+        <ol class="steps"><li>בטלפון של הלקוח: וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</li><li>סורקים את הקוד</li></ol>
+        <div class="card" style="text-align:center"><b>או בלי לסרוק: קוד צימוד</b>
+          <div class="muted small">ב"קישור מכשיר" בוחרים "קישור עם מספר טלפון", ומזינים:</div>
+          <div class="pair">${s.pairingCode ? esc(s.pairingCode) : '— — — —'}</div>
+          <button class="btn sm" data-act="pair" data-id="${id}">${s.pairingCode ? 'קוד חדש' : `קבלת קוד ל-<span class="ltr">+${esc(s.phone)}</span>`}</button>
+        </div>${err}`;
     } else {
-      const file = $('fileInput').files[0];
-      if (!file) throw new Error('בחר קובץ סרטון');
-      await upload(file, d);
+      box.innerHTML = `<div class="muted">⏳ ${s.linked ? 'מתחבר…' : 'מכין קוד…'}</div>${err}`;
     }
-    f.reset();
-  } catch (e) { $('epErr').textContent = e.message; }
+  };
+  tick(); sheetTimer = setInterval(tick, 2000);
 }
 
-function upload(file, d) {
+function custMenu(id) {
+  const c = custById(id);
+  openSheet(`<h2>${esc(c.name)}</h2>
+    ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resendPick" data-id="${id}">📥 שליחה מחדש של פרק</button>` : ''}
+    ${!c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="connect" data-id="${id}">📱 חיבור וואטסאפ</button>` : ''}
+    <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
+    ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
+    <button class="menu-item red" data-act="delCust" data-id="${id}">🗑 מחיקת לקוח</button>`);
+}
+
+function resendPick(id) {
+  const c = custById(id);
+  openSheet(`<h2>📥 איזה פרק לשלוח שוב ל${esc(c.firstName)}?</h2>
+    <div class="field"><input id="pickSearch" placeholder="🔍 למשל 6 4"></div>
+    <div class="pick-list" id="pickList"></div>`);
+  const draw = () => {
+    const q = $('pickSearch').value.match(/\d+/g) || [];
+    $('pickList').innerHTML = state.episodes.filter((e) => (!q[0] || e.season == q[0]) && (!q[1] || e.episode == q[1]))
+      .map((e) => `<button class="menu-item" data-act="resend" data-id="${id}" data-ep="${e.id}">עונה ${e.season} · פרק ${e.episode}${e.title ? ' · ' + esc(e.title) : ''}</button>`).join('') || '<div class="muted">אין</div>';
+  };
+  $('pickSearch').oninput = draw; draw();
+}
+
+function epMenu(id) {
+  const e = epById(id);
+  openSheet(`<h2>עונה ${e.season} · פרק ${e.episode}</h2>
+    <div class="ep-chips" style="margin-bottom:10px">${epChips(e)}</div>
+    <button class="menu-item" data-act="editEp" data-id="${id}">✏️ עריכת עונה / פרק / שם</button>
+    <button class="menu-item" data-act="replaceEp" data-id="${id}">🔁 החלפת הסרטון</button>
+    ${e.fileGone ? `<button class="menu-item" data-act="reattach" data-id="${id}">📁 העלאה מחדש לטלפון (אותו סרטון)</button>` : ''}
+    ${e.link ? `<a class="menu-item" href="${esc(e.link)}" target="_blank" style="color:inherit;text-decoration:none">🔗 פתיחה בדרייב</a>` : ''}
+    <button class="menu-item red" data-act="delEp" data-id="${id}">🗑 מחיקת פרק</button>`);
+}
+
+function episodeForm(e, mode) {
+  // mode: 'new' | 'edit' (details only) | 'replace' (new video) | 'reattach' (same video back to phone)
+  const showDetails = mode !== 'reattach';
+  const showVideo = mode !== 'edit';
+  const next = state.episodes.length ? state.episodes.at(-1) : null;
+  const season = e ? e.season : next ? next.season : '';
+  const episode = e ? e.episode : next ? next.episode + 1 : '';
+  const title = { new: 'פרק חדש', edit: 'עריכת פרק', replace: 'החלפת הסרטון', reattach: 'העלאה מחדש לטלפון' }[mode];
+  openSheet(`<h2>${title}</h2>
+    <form id="epForm">
+      ${showDetails ? `<div class="two">
+        <div class="field"><label>עונה</label><input name="season" type="number" min="0" inputmode="numeric" required value="${season}" ${mode === 'replace' ? 'readonly' : ''}></div>
+        <div class="field"><label>פרק</label><input name="episode" type="number" min="0" inputmode="numeric" required value="${episode}" ${mode === 'replace' ? 'readonly' : ''}></div>
+      </div>
+      <div class="field"><label>שם הפרק (לא חובה)</label><input name="title" value="${esc(e?.title)}"></div>` : `<p class="muted">בחר את אותו סרטון של עונה ${e.season} פרק ${e.episode}. הלקוחות לא יקבלו אותו שוב.</p>`}
+      ${showVideo ? `
+        ${mode !== 'reattach' ? `<div class="seg"><button type="button" class="on" data-src="link">🔗 קישור לדרייב</button><button type="button" data-src="file">📁 קובץ מהטלפון</button></div>` : ''}
+        <div class="field" id="linkField" ${mode === 'reattach' ? 'hidden' : ''}><label>קישור לדרייב (שיתוף: כל מי שיש לו את הקישור)</label><input name="link" class="ltr" inputmode="url" placeholder="https://drive.google.com/file/d/…"></div>
+        <label class="filepick" id="fileField" ${mode === 'reattach' ? '' : 'hidden'}><input type="file" name="file" accept="video/*" hidden><span id="fileName">📁 <b>בחירת סרטון</b> (MP4)</span></label>
+        <progress id="upProg" value="0" max="1" hidden></progress>` : ''}
+      <div class="err" id="formErr"></div>
+      <button class="btn gold block" style="margin-top:12px">${mode === 'new' ? 'הוספה' : 'שמירה'}</button>
+    </form>`);
+  let src = mode === 'reattach' ? 'file' : 'link';
+  const f = $('epForm');
+  f.querySelectorAll('[data-src]').forEach((b) => (b.onclick = () => {
+    src = b.dataset.src;
+    f.querySelectorAll('[data-src]').forEach((x) => x.classList.toggle('on', x === b));
+    $('linkField').hidden = src !== 'link'; $('fileField').hidden = src !== 'file';
+  }));
+  const fileInput = f.querySelector('input[type=file]');
+  if (fileInput) fileInput.onchange = () => { const x = fileInput.files[0]; if (x) $('fileName').innerHTML = `🎞 <b>${esc(x.name)}</b> · ${fmt(x.size)}`; };
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = Object.fromEntries(new FormData(f));
+    $('formErr').textContent = '';
+    const btn = f.querySelector('.btn.gold'); btn.disabled = true;
+    try {
+      if (mode === 'edit') await api('PUT', `/api/episodes/${e.id}`, d);
+      else if (src === 'link') await saveLink(d, e);
+      else await upload(fileInput.files[0], d, e, mode);
+      closeSheet(); toast('נשמר ✓');
+    } catch (err) { $('formErr').textContent = err.message; }
+    btn.disabled = false;
+  };
+}
+
+async function saveLink(d, e, replace = false) {
+  try {
+    await api('POST', '/api/episodes', { ...d, id: e?.id, replace });
+  } catch (err) {
+    if (err.message !== 'EXISTS') throw err;
+    if (!confirm(`עונה ${d.season} פרק ${d.episode} כבר קיים. להחליף את הסרטון שלו?`)) throw new Error('לא נשמר');
+    return saveLink(d, e, true);
+  }
+}
+
+function upload(file, d, e, mode, replace = false) {
+  if (!file) return Promise.reject(new Error('בחר קובץ סרטון'));
+  const q = mode === 'reattach'
+    ? new URLSearchParams({ id: e.id, reattach: 1 })
+    : new URLSearchParams({ season: d.season, episode: d.episode, title: d.title || '', ...(e ? { id: e.id } : {}), ...(replace ? { replace: 1 } : {}) });
   return new Promise((resolve, reject) => {
-    const q = new URLSearchParams({ season: d.season, episode: d.episode, title: d.title || '' });
     const xhr = new XMLHttpRequest(), prog = $('upProg');
     xhr.open('POST', '/api/episodes/upload?' + q);
-    prog.style.display = '';
-    xhr.upload.onprogress = (e) => { prog.max = e.total; prog.value = e.loaded; };
+    prog.hidden = false;
+    xhr.upload.onprogress = (ev) => { prog.max = ev.total; prog.value = ev.loaded; };
     xhr.onload = () => {
-      prog.style.display = 'none'; load();
-      xhr.status === 200 ? resolve() : reject(new Error(JSON.parse(xhr.responseText || '{}').error || 'ההעלאה נכשלה'));
+      prog.hidden = true; load();
+      if (xhr.status === 200) return resolve();
+      const msg = JSON.parse(xhr.responseText || '{}').error || 'ההעלאה נכשלה';
+      if (msg === 'EXISTS' && confirm(`עונה ${d.season} פרק ${d.episode} כבר קיים. להחליף את הסרטון שלו?`)) return upload(file, d, e, mode, true).then(resolve, reject);
+      reject(new Error(msg === 'EXISTS' ? 'לא נשמר' : msg));
     };
-    xhr.onerror = () => { prog.style.display = 'none'; reject(new Error('ההעלאה נכשלה')); };
+    xhr.onerror = () => { prog.hidden = true; reject(new Error('ההעלאה נכשלה')); };
     xhr.send(file);
   });
 }
 
-function openEditEp(id) {
-  const e = state.episodes.find((x) => x.id === id), f = editEp.querySelector('form');
-  f.id.value = e.id; f.season.value = e.season; f.episode.value = e.episode; f.title.value = e.title || ''; f.link.value = '';
-  $('editEpErr').textContent = '';
-  editEp.showModal();
-}
-async function saveEpisode(ev) {
-  ev.preventDefault();
-  const d = formData(ev.target);
-  try {
-    if (d.link.trim()) await api('POST', '/api/episodes', d);
-    else await api('PUT', `/api/episodes/${d.id}`, d);
-    editEp.close();
-  } catch (e) { $('editEpErr').textContent = e.message; }
-}
-function delEp(id) {
-  const e = state.episodes.find((x) => x.id === id);
-  if (confirm(`למחוק את עונה ${e.season} פרק ${e.episode}? בסנכרון הבא הוא יימחק גם אצל הלקוחות.`)) api('DELETE', `/api/episodes/${id}`);
-}
+// ---------------------------------------------------------------- actions
+const actions = {
+  syncAll: () => run(api('POST', '/api/sync-all'), (r) => r.count ? `🔄 סנכרון של ${r.count} לקוחות התחיל` : 'אין לקוחות מחוברים'),
+  sync: (b) => run(api('POST', `/api/customers/${b.dataset.id}/sync`), (r) => r.queued ? '🔄 הסנכרון התחיל' : 'כבר בתור'),
+  unblock: (b) => confirm('לבטל את החסימה? קבוצת החסימה תימחק, תיווצר קבוצת פרקים חדשה, וכל הפרקים יישלחו.') && run(api('POST', `/api/customers/${b.dataset.id}/unblock`), 'ביטול החסימה התחיל'),
+  connect: (b) => connectSheet(b.dataset.id),
+  pair: (b) => run(api('POST', `/api/customers/${b.dataset.id}/wa/pair`), 'מבקש קוד…'),
+  custMenu: (b) => custMenu(b.dataset.id),
+  editCust: (b) => customerForm(custById(b.dataset.id)),
+  resendPick: (b) => resendPick(b.dataset.id),
+  resend: (b) => { closeSheet(); run(api('POST', `/api/customers/${b.dataset.id}/resend`, { episodeId: b.dataset.ep }), '📥 יישלח שוב בסנכרון שהתחיל'); },
+  logout: (b) => { if (confirm('לנתק את הבוט מהוואטסאפ של הלקוח? הקבוצה והפרקים יישארו אצלו.')) { closeSheet(); run(api('POST', `/api/customers/${b.dataset.id}/logout`), 'מנתק…'); } },
+  delCust: (b) => { const c = custById(b.dataset.id); if (confirm(`למחוק את ${c.name}? הבוט גם יתנתק מהוואטסאפ שלו.`)) { closeSheet(); run(api('DELETE', `/api/customers/${c.id}`), 'נמחק'); } },
+  epMenu: (b) => epMenu(b.dataset.id),
+  editEp: (b) => episodeForm(epById(b.dataset.id), 'edit'),
+  replaceEp: (b) => episodeForm(epById(b.dataset.id), 'replace'),
+  reattach: (b) => episodeForm(epById(b.dataset.id), 'reattach'),
+  delEp: (b) => { const e = epById(b.dataset.id); if (confirm(`למחוק את עונה ${e.season} פרק ${e.episode}? בסנכרון הבא הוא יימחק גם אצל הלקוחות.`)) { closeSheet(); run(api('DELETE', `/api/episodes/${e.id}`), 'נמחק'); } },
+  fab: () => (tab === 'episodes' ? episodeForm(null, 'new') : customerForm(null)),
+  keep: (b) => run(api('PUT', '/api/settings', { keepDays: Math.max(0, state.settings.keepDays + Number(b.dataset.d)) })),
+  reuse: () => run(api('PUT', '/api/settings', { reuseUploads: !state.settings.reuseUploads })),
+  resetMax: () => run(api('PUT', '/api/settings', { resetMaxVideo: true }), 'אופס. בפעם הבאה ינסה שוב את הגודל המלא'),
+  cleanup: () => confirm('למחוק עכשיו מהטלפון את כל הסרטונים שבטוח למחוק?') && run(api('POST', '/api/cleanup'), (r) => `🧹 פונו ${fmt(r.freed)}`),
+};
 
+document.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-act]');
+  if (b && actions[b.dataset.act]) { ev.preventDefault(); actions[b.dataset.act](b); }
+  const t = ev.target.closest('[data-tab]');
+  if (t) {
+    tab = t.dataset.tab;
+    document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === t));
+    document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === 'p-' + tab));
+    $('fab').hidden = tab === 'log' || tab === 'settings';
+    if (tab === 'log') $('log').scrollTop = $('log').scrollHeight;
+    try { localStorage.tab = tab; } catch {}
+  }
+});
+$('custSearch').oninput = () => state && renderCustomers();
+$('epSearch').oninput = () => state && renderEpisodes();
+
+try { const t = localStorage.tab; if (t) document.querySelector(`[data-tab="${t}"]`)?.click(); } catch {}
 load();
 setInterval(load, 2500);
 </script>

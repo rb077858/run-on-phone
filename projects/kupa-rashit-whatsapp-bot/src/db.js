@@ -5,20 +5,33 @@ import fs from "node:fs";
 import { DB_FILE } from "./config.js";
 
 const empty = () => ({
-  manager: { groupJid: null, pending: null },
-  // { id, season, episode, title, source: { type: "drive", fileId, link } | { type: "file", file }, addedAt }
+  settings: {},
+  // { id, season, episode, title, source: { type: "drive", fileId, link } | { type: "file", file },
+  //   media: { key, limit, parts: [{ size, ref, refAt }] }  ← how it was uploaded to WhatsApp
+  //   lastUsed, localFiles, addedAt }
   episodes: [],
-  // { id, firstName, lastName, phone, status: "new"|"active"|"blocked", groupJid, blockGroupJid,
-  //   connectedAs, sent: [{ episodeId, sourceKey, key, timestamp }], blockedReason, lastSync, createdAt }
+  // { id, firstName, lastName, phone, status: "new"|"active"|"blocked", groupJid, groupDesc,
+  //   blockGroupJid, connectedAs, lastSync, createdAt,
+  //   sent: [{ episodeId, sourceKey, title, part, parts, key, timestamp }],
+  //   inbox: [{ id, key, timestamp, text, quotedId } | { manual: true, episodeId }] }
   customers: [],
 });
+
+export const DEFAULT_SETTINGS = {
+  keepDays: 3, // delete episode videos from the phone this many days after they were last used
+  reuseUploads: true, // upload each video to WhatsApp once and reuse it for all customers
+  maxVideoBytes: null, // learned: the part size WhatsApp accepted
+};
 
 let data = empty();
 try {
   data = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, "utf8")) };
 } catch {}
 
+delete data.manager; // older versions had a manager WhatsApp account
+
 export const db = () => data;
+export const settings = () => Object.assign(data.settings, { ...DEFAULT_SETTINGS, ...data.settings });
 
 export function save() {
   const tmp = DB_FILE + ".tmp";

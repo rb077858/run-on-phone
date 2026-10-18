@@ -1,24 +1,20 @@
 // Everything done through a customer's own WhatsApp account: creating the
 // "קופה ראשית פרקים" group, syncing episodes into it, and blocking / unblocking.
-import { jidNormalizedUser } from "baileys";
-import fs from "node:fs";
+import { getContentType, jidNormalizedUser, normalizeMessageContent } from "baileys";
 import {
   BLOCKED_GROUP_NAME,
   BLOCKED_MESSAGE,
   EPISODES_GROUP_DESC,
   EPISODES_GROUP_NAME,
-  THUMBNAIL,
-  episodeCaption,
 } from "./config.js";
-import { db, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
+import { db, findEpisode, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
+import { firstUpload, forgetRefChecks, mediaPlan, sendParts } from "./delivery.js";
 import { addLog, enqueue } from "./jobs.js";
-import { episodeFile, formatBytes, videoParts } from "./media.js";
-import { makeUploader } from "./upload.js";
 import { numberOf, session, sleep } from "./wa.js";
 
 export const customerName = (c) => `${c.firstName} ${c.lastName}`.trim();
 
-export const customerSession = (id) => session(id, { onOpen: onCustomerOpen });
+export const customerSession = (id) => session(id, { onOpen: onCustomerOpen, onMessages: onCustomerMessages });
 
 // Runs every time a customer's WhatsApp connects (including right after linking).
 async function onCustomerOpen(s) {
@@ -69,6 +65,7 @@ async function createEpisodesGroup(c, sock) {
   c.groupJid = jid;
   c.groupDesc = meta?.desc ?? EPISODES_GROUP_DESC; // compare with what WhatsApp actually stored
   c.sent = [];
+  c.inbox = [];
   save();
   return jid;
 }
@@ -114,7 +111,104 @@ async function leaveAndDeleteChat(sock, jid, lastKey, lastTimestamp) {
   await tryDo("delete chat", () => sock.chatModify({ delete: true, lastMessages }, jid));
 }
 
+// ------------------------------------------------------------------ inbox
+// Messages the customer writes in the episodes group (the bot only sees them while
+// connected, or right after connecting – WhatsApp delivers what arrived meanwhile).
+// They are requests to resend a video, and are deleted so the group holds only videos.
+const IGNORED_TYPES = new Set([
+  "videoMessage",
+  "protocolMessage",
+  "reactionMessage",
+  "senderKeyDistributionMessage",
+  "messageContextInfo",
+  "pollUpdateMessage",
+]);
+
+function onCustomerMessages(s, { messages }) {
+  const c = getCustomer(s.id);
+  if (!c?.groupJid) return;
+  let changed = false;
+  for (const m of messages) {
+    if (m.key.remoteJid !== c.groupJid || !m.message) continue;
+    const content = normalizeMessageContent(m.message);
+    const type = getContentType(content);
+    if (!type || IGNORED_TYPES.has(type)) continue;
+    c.inbox ??= [];
+    if (c.inbox.some((x) => x.id === m.key.id) || c.sent?.some((r) => r.key.id === m.key.id)) continue;
+    const inner = content[type];
+    c.inbox.push({
+      id: m.key.id,
+      key: m.key,
+      timestamp: Number(m.messageTimestamp) || Math.floor(Date.now() / 1000),
+      text: (typeof inner === "string" ? inner : inner?.text || inner?.caption || "").slice(0, 200),
+      quotedId: inner?.contextInfo?.stanzaId || null,
+    });
+    changed = true;
+  }
+  if (changed) save();
+}
+
+/** Which episode a request is about: a reply to one of its videos, or "עונה 6 פרק 4" / "ע6פ4" / "S06E04". */
+function requestedEpisode(c, req) {
+  if (req.episodeId) return db().episodes.find((e) => e.id === req.episodeId) || null;
+  if (req.quotedId) {
+    const rec = c.sent.find((r) => r.key.id === req.quotedId);
+    if (rec) return db().episodes.find((e) => e.id === rec.episodeId) || null;
+  }
+  const t = req.text || "";
+  const m =
+    t.match(/עונה\s*(\d+)\D{0,10}?פרק\s*(\d+)/) ||
+    t.match(/ע\s*(\d+)\s*פ\s*(\d+)/) ||
+    t.match(/s\s*(\d+)\s*e\s*(\d+)/i) ||
+    t.match(/^\s*(\d+)\D+(\d+)\s*$/);
+  return m ? findEpisode(Number(m[1]), Number(m[2])) || null : null;
+}
+
+async function handleInbox(c, sock) {
+  const name = customerName(c);
+  for (const req of c.inbox || []) {
+    if (req.key) await deleteSent(sock, c.groupJid, req); // keep the group videos-only
+    const ep = requestedEpisode(c, req);
+    if (!ep) {
+      if (req.text) addLog(`  ${name}: הודעה בקבוצה שלא הובנה ("${req.text.slice(0, 40)}"), נמחקה`);
+      continue;
+    }
+    // Resend only the part that was replied to, or the whole episode.
+    const quoted = req.quotedId && c.sent.find((r) => r.key.id === req.quotedId);
+    const recs = c.sent.filter((r) => r.episodeId === ep.id && (!quoted || r.part === quoted.part));
+    addLog(`📥 ${name}: ביקש שוב עונה ${ep.season} פרק ${ep.episode}${quoted && quoted.parts > 1 ? ` חלק ${quoted.part}` : ""}`);
+    for (const rec of recs) await deleteSent(sock, c.groupJid, rec);
+    c.sent = c.sent.filter((r) => !recs.includes(r));
+  }
+  c.inbox = [];
+  save();
+}
+
+/** Manual resend from the admin panel (handled on the next sync). */
+export function requestResend(c, episodeId) {
+  c.inbox ??= [];
+  c.inbox.push({ id: `manual-${Date.now()}`, episodeId });
+  save();
+}
+
 // -------------------------------------------------------------------- sync
+// Same video, title and season/episode (older records lack some fields: treated as equal).
+const recordMatches = (rec, ep) =>
+  rec.sourceKey === sourceKey(ep.source) &&
+  (rec.title === undefined || rec.title === (ep.title || "")) &&
+  (rec.se === undefined || rec.se === `${ep.season}x${ep.episode}`);
+
+/** Number of episodes the customer has completely (a split episode counts once). */
+export function deliveredCount(c) {
+  let count = 0;
+  for (const ep of db().episodes) {
+    const recs = (c.sent || []).filter((r) => r.episodeId === ep.id && recordMatches(r, ep));
+    const parts = recs[0]?.parts || 1;
+    if (recs.length && new Set(recs.map((r) => r.part || 1)).size === parts) count++;
+  }
+  return count;
+}
+
 export async function syncCustomer(c) {
   const name = customerName(c);
   if (c.status === "blocked") return addLog(`⏭ ${name}: חסום, מדלג`);
@@ -134,123 +228,66 @@ export async function syncCustomer(c) {
     const reasons = await violations(c, sock, meta);
     if (reasons.length) return block(c, sock, meta, reasons);
     if (meta.ephemeralDuration) await tryDo("ephemeral off", () => sock.groupToggleEphemeral(c.groupJid, 0));
-
-    // Keep the longest prefix of episodes that is already complete and in the right order;
-    // delete everything after it and re-send, so the group always shows them in order.
-    // An episode may be several messages (parts), see sendEpisode.
-    const desired = sortedEpisodes();
-    const sent = c.sent || [];
-    const groups = [];
-    for (const rec of sent) {
-      const last = groups.at(-1);
-      if (last && (rec.part || 1) > 1 && last[0].episodeId === rec.episodeId) last.push(rec);
-      else groups.push([rec]);
-    }
-    let keepEpisodes = 0;
-    let keepMessages = 0;
-    for (const g of groups) {
-      const ep = desired[keepEpisodes];
-      const ok =
-        ep &&
-        g[0].episodeId === ep.id &&
-        g[0].sourceKey === sourceKey(ep.source) &&
-        g[0].caption === episodeCaption(ep) &&
-        g.length === (g[0].parts || 1);
-      if (!ok) break;
-      keepEpisodes++;
-      keepMessages += g.length;
-    }
-
-    const toDelete = sent.length - keepMessages;
-    if (toDelete) addLog(`${name}: מוחק ${toDelete} הודעות כדי לסדר מחדש`);
-    while (c.sent.length > keepMessages) {
-      await deleteSent(sock, c.groupJid, c.sent.at(-1));
-      c.sent.pop();
+    if (norm(c.groupDesc) !== norm(EPISODES_GROUP_DESC)) {
+      // The bot's description text changed in a newer version: update it in the group.
+      await tryDo("description", () => sock.groupUpdateDescription(c.groupJid, EPISODES_GROUP_DESC));
+      await sleep(1000);
+      const m2 = await tryDo("metadata", () => sock.groupMetadata(c.groupJid));
+      c.groupDesc = m2?.desc ?? EPISODES_GROUP_DESC;
       save();
     }
 
-    const missing = desired.slice(keepEpisodes);
-    if (!missing.length) addLog(`✔ ${name}: מעודכן (${desired.length} פרקים)`);
-    for (const [i, ep] of missing.entries()) {
-      const label = `עונה ${ep.season} פרק ${ep.episode}`;
-      const file = await episodeFile(ep.source, (done, total) =>
-        addLog(`  ⬇ ${label}: ${formatBytes(done)}${total ? ` / ${formatBytes(total)}` : ""}`),
-      );
-      addLog(`${name}: שולח ${label} (${i + 1}/${missing.length}, ${formatBytes(fs.statSync(file).size)})`);
-      await sendEpisode(c, s, sock, ep, file);
+    await s.waitOfflineMessages();
+    await handleInbox(c, sock);
+
+    // Messages of deleted/changed episodes, duplicates and leftovers of a different split.
+    const episodes = new Map(db().episodes.map((e) => [e.id, e]));
+    const seen = new Set();
+    const stale = c.sent.filter((r) => {
+      const ep = episodes.get(r.episodeId);
+      const plan = ep && mediaPlan(ep);
+      const id = `${r.episodeId}#${r.part || 1}`;
+      const bad = !ep || !recordMatches(r, ep) || (plan && (r.parts || 1) !== plan.parts.length) || seen.has(id);
+      seen.add(id);
+      return bad;
+    });
+    if (stale.length) addLog(`${name}: מוחק ${stale.length} הודעות של פרקים שנמחקו או השתנו`);
+    for (const rec of stale) await deleteSent(sock, c.groupJid, rec);
+    c.sent = c.sent.filter((r) => !stale.includes(r));
+    save();
+
+    const onSent = (rec) => {
+      c.sent.push(rec);
+      save();
+    };
+    const undo = async (recs) => {
+      for (const rec of recs) await deleteSent(sock, c.groupJid, rec);
+      c.sent = c.sent.filter((r) => !recs.includes(r));
+      save();
+    };
+
+    let sentEpisodes = 0;
+    for (const ep of sortedEpisodes()) {
+      const recs = c.sent.filter((r) => r.episodeId === ep.id);
+      const plan = mediaPlan(ep);
+      const total = plan ? plan.parts.length : recs[0]?.parts || 1;
+      const have = new Set(recs.map((r) => r.part || 1));
+      const missing = Array.from({ length: total }, (_, i) => i + 1).filter((p) => !have.has(p));
+      if (!missing.length) continue;
+      sentEpisodes++;
+      if (plan) {
+        await sendParts(c, s, sock, ep, missing, onSent);
+      } else {
+        // Never uploaded with the current video: remove partial leftovers, upload fresh.
+        await undo(recs);
+        await firstUpload(c, s, sock, ep, onSent, undo);
+      }
     }
     c.lastSync = Date.now();
     save();
-    if (missing.length) addLog(`✔ ${name}: הסתיים, ${desired.length} פרקים בקבוצה`);
+    const what = !sentEpisodes ? "מעודכן" : sentEpisodes === 1 ? "נשלח פרק אחד" : `נשלחו ${sentEpisodes} פרקים`;
+    addLog(`✔ ${name}: ${what}, יש לו ${deliveredCount(c)}/${db().episodes.length} פרקים`);
   });
-}
-
-// WhatsApp rejects videos above some size (HTTP 413). Big episodes are split into parts
-// of these sizes, trying the largest first; the size that worked is remembered.
-const PART_SIZES = [95e6, 63e6, 31e6, 15e6];
-
-async function sendEpisode(c, s, sock, ep, file) {
-  const size = fs.statSync(file).size;
-  const settings = (db().settings ??= {});
-  const known = settings.maxVideoBytes;
-  const limits = [
-    ...(known && size > known ? [] : [null]), // null = the whole file
-    ...PART_SIZES.filter((l) => l < size && (!known || l <= known)),
-  ];
-  const caption = episodeCaption(ep);
-  const firstIndex = c.sent.length;
-  for (const limit of limits) {
-    let parts;
-    try {
-      parts = limit ? videoParts(file, limit) : [file];
-    } catch (e) {
-      throw new Error(`חלוקת הסרטון לחלקים נכשלה: ${e.message}`);
-    }
-    if (parts.length > 1) addLog(`  ✂ מחלק ל-${parts.length} חלקים (עד ${formatBytes(limit)} כל אחד)`);
-    try {
-      for (const [i, part] of parts.entries()) {
-        s.touch();
-        const partCaption = parts.length > 1 ? `${caption}\n🧩 חלק ${i + 1} מתוך ${parts.length}` : caption;
-        if (parts.length > 1) addLog(`  שולח חלק ${i + 1}/${parts.length} (${formatBytes(fs.statSync(part).size)})`);
-        const msg = await sock.sendMessage(
-          c.groupJid,
-          {
-            video: { url: part },
-            caption: partCaption,
-            mimetype: "video/mp4",
-            jpegThumbnail: THUMBNAIL, // also keeps Baileys from looking for ffmpeg
-          },
-          { upload: makeUploader(sock, addLog) },
-        );
-        s.sentCache.set(msg.key.id, msg.message);
-        c.sent.push({
-          episodeId: ep.id,
-          sourceKey: sourceKey(ep.source),
-          caption,
-          part: i + 1,
-          parts: parts.length,
-          key: msg.key,
-          timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000),
-        });
-        save();
-      }
-      if (limit && settings.maxVideoBytes !== limit) {
-        settings.maxVideoBytes = limit;
-        save();
-      }
-      return;
-    } catch (e) {
-      if (!e.tooLarge) throw e;
-      addLog(`  ⚠ וואטסאפ לא מקבל קובץ בגודל הזה, מנסה חלקים קטנים יותר`);
-      // Remove parts of this episode that were already sent at the bigger size.
-      while (c.sent.length > firstIndex) {
-        await deleteSent(sock, c.groupJid, c.sent.at(-1));
-        c.sent.pop();
-        save();
-      }
-    }
-  }
-  throw new Error("וואטסאפ לא מקבל את הסרטון גם אחרי חלוקה לחלקים קטנים");
 }
 
 // ------------------------------------------------------------ block/unblock
@@ -306,6 +343,7 @@ export function queueSync(c) {
 }
 
 export function queueSyncAll() {
+  forgetRefChecks();
   const list = db().customers.filter((c) => c.status !== "blocked" && customerSession(c.id).isLinked());
   for (const c of list) queueSync(c);
   return list.length;

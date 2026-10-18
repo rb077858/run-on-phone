@@ -1,7 +1,6 @@
-// Getting episode videos onto disk: from Google Drive links, from videos/files sent in
-// the manager group, and from admin-panel uploads. Everything is streamed to disk, never
-// held in memory.
-import { downloadContentFromMessage } from "baileys";
+// Episode videos on the phone: downloads from Google Drive links, admin-panel uploads,
+// split parts, and deleting them again after a few days. Everything is streamed to disk,
+// never held in memory.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -93,29 +92,10 @@ async function downloadDrive(fileId, dest, onProgress) {
   return dest;
 }
 
-// ------------------------------------------------------- WhatsApp & uploads
-/** The video inside a WhatsApp message (sent as a video or as a video/any file document). */
-export function videoContent(message) {
-  if (message?.videoMessage) return { type: "video", content: message.videoMessage };
-  const doc = message?.documentMessage || message?.documentWithCaptionMessage?.message?.documentMessage;
-  if (doc && (/^video\//.test(doc.mimetype || "") || /\.(mp4|m4v|mov|mkv|webm|avi)$/i.test(doc.fileName || ""))) {
-    return { type: "document", content: doc };
-  }
-  return null;
-}
-
-/** Saves a WhatsApp video to MEDIA_DIR and returns the stored file name. */
-export async function saveWhatsAppVideo({ type, content }, onProgress) {
-  const file = `wa-${newId()}.mp4`;
-  const stream = await downloadContentFromMessage(content, type);
-  await streamToFile(stream, path.join(MEDIA_DIR, file), Number(content.fileLength) || 0, onProgress);
-  return file;
-}
-
-/** Saves an uploaded request body (raw video bytes) to MEDIA_DIR. */
-export async function saveUpload(req) {
-  const file = `up-${newId()}.mp4`;
-  await streamToFile(req, path.join(MEDIA_DIR, file), Number(req.headers["content-length"]) || 0);
+// ------------------------------------------------------------------ uploads
+/** Saves an uploaded request body (raw video bytes) to MEDIA_DIR, optionally under a given name. */
+export async function saveUpload(req, file = `up-${newId()}.mp4`) {
+  await streamToFile(req, path.join(MEDIA_DIR, path.basename(file)), Number(req.headers["content-length"]) || 0);
   return file;
 }
 
@@ -144,12 +124,22 @@ export function videoParts(file, maxBytes) {
 export function episodeFile(source, onProgress) {
   if (source.type === "drive") return ensureDriveFile(source.fileId, onProgress);
   const p = path.join(MEDIA_DIR, source.file);
-  if (!fs.existsSync(p)) return Promise.reject(new Error("קובץ הסרטון חסר בטלפון – העלה אותו מחדש"));
+  if (!fs.existsSync(p)) {
+    return Promise.reject(new Error("קובץ הסרטון כבר נמחק מהטלפון. העלה אותו שוב בממשק (בפרק: \"העלאה מחדש\")"));
+  }
   return Promise.resolve(p);
+}
+
+/** Local path of the episode's full video if it is on the phone right now, else null. */
+export function localSourcePath(source) {
+  const p =
+    source.type === "drive" ? path.join(CACHE_DIR, `drive-${source.fileId}.mp4`) : path.join(MEDIA_DIR, source.file);
+  return fs.existsSync(p) ? p : null;
 }
 
 export function deleteSourceFile(source) {
   if (source?.type === "file") fs.rmSync(path.join(MEDIA_DIR, path.basename(source.file)), { force: true });
+  if (source?.type === "drive") fs.rmSync(path.join(CACHE_DIR, `drive-${source.fileId}.mp4`), { force: true });
 }
 
 function dirSize(dir) {
@@ -164,8 +154,56 @@ function dirSize(dir) {
 
 export const storageInfo = () => ({ cache: dirSize(CACHE_DIR), media: dirSize(MEDIA_DIR) });
 
-export function clearDriveCache() {
-  for (const f of fs.readdirSync(CACHE_DIR)) fs.rmSync(path.join(CACHE_DIR, f), { force: true });
+/** Total size of an episode's files that are on the phone right now. */
+export function episodeLocalBytes(ep) {
+  let total = 0;
+  for (const p of [localSourcePath(ep.source), ...(ep.localFiles || [])]) {
+    try {
+      if (p) total += fs.statSync(p).size;
+    } catch {}
+  }
+  return total;
+}
+
+/**
+ * Deletes videos from the phone that were not used for `keepDays` days. Only safe ones:
+ * Drive videos (can be downloaded again) and uploaded videos that WhatsApp already has
+ * (every part uploaded at least once). Split parts and unknown cache files go too.
+ * Returns the number of bytes freed.
+ */
+export function cleanupLocal(episodes, keepDays, force = false) {
+  const cutoff = Date.now() - keepDays * 86400_000;
+  let freed = 0;
+  const rm = (p) => {
+    try {
+      freed += fs.statSync(p).size;
+      fs.rmSync(p, { force: true });
+    } catch {}
+  };
+  const keep = new Set();
+  for (const ep of episodes) {
+    const uploaded = ep.media?.parts?.length && ep.media.parts.every((p) => p.ref);
+    const safe = ep.source.type === "drive" || uploaded;
+    const old = force || (ep.lastUsed || ep.addedAt || 0) < cutoff;
+    const files = [localSourcePath(ep.source), ...(ep.localFiles || [])].filter(Boolean);
+    if (safe && old) {
+      files.forEach(rm);
+      ep.localFiles = [];
+      if (ep.source.type === "file" && files.length) ep.localDeletedAt = Date.now();
+    } else files.forEach((f) => keep.add(path.resolve(f)));
+  }
+  // Leftovers in the cache that no episode uses (deleted episodes, old split sizes, …).
+  for (const f of fs.readdirSync(CACHE_DIR)) {
+    const p = path.resolve(CACHE_DIR, f);
+    if (keep.has(p) || f.endsWith(".part")) continue;
+    if (f.endsWith(".json")) {
+      if (force || fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
+      continue;
+    }
+    const used = episodes.some((ep) => localSourcePath(ep.source) === p || ep.localFiles?.includes(p));
+    if (!used || force) rm(p);
+  }
+  return freed;
 }
 
 export const formatBytes = (n) =>

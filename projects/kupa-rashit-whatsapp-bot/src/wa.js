@@ -1,6 +1,5 @@
-// One Baileys socket per WhatsApp account: "manager" plus one per customer.
-// Customer sockets are opened only when needed (connect / sync / unblock) and close
-// themselves after a few idle minutes; the manager socket stays up while the bot runs.
+// One Baileys socket per customer WhatsApp account. Sockets are opened only when needed
+// (linking / sync / unblock) and close themselves after a few idle minutes.
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -62,6 +61,7 @@ export class WaSession {
     if (this.sock && this.state !== "closed" && this.state !== "loggedOut") return;
     this.stopped = false;
     this.state = "connecting";
+    this.offlineDone = false;
     this.qrDataUrl = null;
     this.pairingCode = null;
     this.pairingRequested = false;
@@ -85,8 +85,9 @@ export class WaSession {
     this.touch();
   }
 
-  async #onUpdate(sock, { connection, lastDisconnect, qr }) {
+  async #onUpdate(sock, { connection, lastDisconnect, qr, receivedPendingNotifications }) {
     if (sock !== this.sock) return;
+    if (receivedPendingNotifications) this.offlineDone = true;
     if (qr) {
       this.state = "qr";
       this.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 });
@@ -174,6 +175,13 @@ export class WaSession {
         reject: (e) => (clearTimeout(timer), reject(e)),
       });
     });
+  }
+
+  /** Waits until messages that arrived while offline were delivered (or timeout). */
+  async waitOfflineMessages(timeoutMs = 15_000) {
+    const until = Date.now() + timeoutMs;
+    while (!this.offlineDone && Date.now() < until) await sleep(300);
+    await sleep(1000); // let the last messages.upsert handlers finish
   }
 
   /** Runs fn(sock) while keeping the session from closing as idle. */
