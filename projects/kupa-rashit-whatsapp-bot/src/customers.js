@@ -123,8 +123,10 @@ async function createEpisodesGroup(c, sock) {
   c.pictureId = null;
   c.deletedByCustomer = [];
   c.inviteLink = null;
+  c.inviteCode = null;
   save();
   await applyGroupLogo(c, sock);
+  await rememberInviteCode(c, sock);
   await sendWelcome(c, sock);
   return jid;
 }
@@ -158,6 +160,19 @@ async function pinWelcome(c, sock) {
 const norm = (s) => String(s || "").replace(/\r/g, "").trim();
 
 /** Rule violations in the episodes group (empty array = all good). */
+// Every group has an invite link from the start; it changes only when someone resets it.
+// Reading it doesn't create or change it. The code from when the group was made is kept,
+// and a different code later means the customer reset the link (against the rules).
+const currentInviteCode = (sock, jid) => tryDo("invite code", () => sock.groupInviteCode(jid));
+
+async function rememberInviteCode(c, sock) {
+  const code = await currentInviteCode(sock, c.groupJid);
+  if (!code) return;
+  c.inviteCode = code;
+  c.inviteLink = `https://chat.whatsapp.com/${code}`;
+  save();
+}
+
 async function violations(c, sock, meta) {
   const reasons = [];
   if (meta.subject !== EPISODES_GROUP_NAME) reasons.push(`שם הקבוצה שונה ל-"${meta.subject}"`);
@@ -167,6 +182,12 @@ async function violations(c, sock, meta) {
   if (pic) {
     if (c.pictureId && pic.id !== c.pictureId) reasons.push(pic.id ? "תמונת הקבוצה הוחלפה" : "תמונת הקבוצה נמחקה");
     else if (!c.pictureId && pic.id) reasons.push("נוספה תמונה לקבוצה");
+  }
+  if (c.inviteCode) {
+    const code = await currentInviteCode(sock, meta.id);
+    if (code && code !== c.inviteCode) reasons.push("קישור ההזמנה לקבוצה אופס");
+  } else {
+    await rememberInviteCode(c, sock); // groups from before this rule: start watching now
   }
   return reasons;
 }
@@ -540,6 +561,7 @@ async function block(c, sock, meta, reasons, kind = "violation", firstMessage = 
     welcome: null,
     deletedByCustomer: [],
     inviteLink: null,
+    inviteCode: null,
     blockGroupJid: blockJid,
     blockMsg: { key: msg.key, timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000) },
   });
@@ -628,6 +650,8 @@ export async function groupLink(c) {
   if (!c.groupJid) throw new Error("אין לו קבוצה עדיין");
   await customerSession(c.id).use(async (sock) => {
     const code = await sock.groupInviteCode(c.groupJid);
+    if (c.inviteCode && code !== c.inviteCode) throw new Error("קישור ההזמנה אופס בידי הלקוח. הוא ייחסם בסנכרון הבא");
+    c.inviteCode ??= code;
     c.inviteLink = `https://chat.whatsapp.com/${code}`;
     save();
   });
