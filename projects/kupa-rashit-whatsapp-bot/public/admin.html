@@ -151,6 +151,12 @@
   .pick input { width: 20px; height: 20px; accent-color: var(--gold); }
   .pick.off { opacity: .45; }
   .hist .who { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .bubble.in { background: var(--card2); color: var(--text); border-radius: 0 12px 12px 12px; border: 1px solid var(--line); }
+  .contact { cursor: pointer; }
+  .contact.new { border-color: var(--gold); box-shadow: 0 0 0 1px #f7c54844; }
+  .status-box { background: var(--card2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 6px 0 12px; display: grid; gap: 6px; font-size: 14px; }
+  .btn-col { display: grid; gap: 8px; }
+  .chip[data-act] { cursor: pointer; }
   .toast { position: fixed; top: 14px; left: 50%; transform: translate(-50%, -150%); background: var(--card2); border: 1px solid var(--line); padding: 11px 16px; border-radius: 14px; box-shadow: var(--shadow); z-index: 20; transition: .25s; max-width: 90vw; font-weight: 600; }
   .toast.on { transform: translate(-50%, 0); }
   .toast.bad { border-color: var(--bad); color: #ffc2cc; }
@@ -199,6 +205,8 @@
     <div id="noticeHistory"></div>
   </section>
 
+  <section class="page" id="p-contacts"><div id="contacts"></div></section>
+
   <section class="page" id="p-log"><div id="log"></div></section>
 
   <section class="page" id="p-settings">
@@ -230,7 +238,7 @@
     </div>
     <div class="card">
       <h3 class="ttl">👑 מספר המנהל</h3>
-      <p class="muted small" style="margin:0 0 8px">אם המספר הזה מצטרף לקבוצה של לקוח, זה לא נחשב "צירוף משתתפים" והלקוח לא נחסם.</p>
+      <p class="muted small" style="margin:0 0 8px">אם המספר הזה מצטרף לקבוצה של לקוח, זה לא נחשב "צירוף משתתפים" והלקוח לא נחסם. אליו מצורפים בקבוצות ובשיחות עם לקוחות.</p>
       <div class="row"><input class="search ltr" id="mgrPhone" inputmode="tel" placeholder="0532476787"><button class="btn" data-act="saveMgr">שמירה</button></div>
     </div>
     <div class="card help">
@@ -240,6 +248,10 @@
       <p>מוחק מהטלפון את העותקים של הבוט, אבל רק של פרקים שכבר הועלו לוואטסאפ. פרק שעוד לא הועלה נשאר. הלקוחות לא מושפעים, כי הם מורידים מוואטסאפ. אם יום אחד וואטסאפ תמחק את העותק שלה ומישהו יבקש את הפרק, תתבקש להעלות אותו שוב. אותו דבר קורה אוטומטית אחרי מספר הימים שלמעלה.</p>
       <h3>📥 בקשות מלקוחות</h3>
       <p>פרק לא נפתח ללקוח? הוא עושה "השב" על הקובץ וכותב משהו, או כותב "עונה 6 פרק 4". בסנכרון הבא ההודעה שלו נמחקת והסרטון נשלח שוב.</p>
+      <h3>✉️ פניות למנהל</h3>
+      <p>לקוח כותב בקבוצת הפרקים "פנייה". בסנכרון הבא נפתחת לו קבוצה "פנייה למנהל", ושם הוא כותב הודעה אחת. לקוח חסום כותב את ההודעה בקבוצת החסימה. בסנכרון שאחרי זה ההודעה מופיעה בלשונית "📩 פניות". שם אפשר לפתוח איתו "שיחה עם המנהל" (אתה מצורף כאדמין), או לדחות.</p>
+      <h3>👑 המנהל בקבוצת הפרקים</h3>
+      <p>לקוח ← ⋯ ← "צירוף המנהל לקבוצה". מרגע שהמנהל צורף או הוזמן, הלקוח שמוציא אותו או מבטל את ההזמנה נחסם. לכן לא יוצאים לבד מהקבוצה: מוציאים את המנהל רק מהממשק.</p>
       <h3>🔎 חיפוש בוואטסאפ</h3>
       <p>בכל סרטון כתוב למשל ע6פ4 ו-S06E04, כך שהלקוח מוצא פרק בחיפוש של הקבוצה.</p>
     </div>
@@ -250,7 +262,8 @@
 <nav>
   <button class="on" data-tab="customers"><span class="i">👥</span>לקוחות<span class="dot" id="reqDot" hidden></span></button>
   <button data-tab="episodes"><span class="i">🎬</span>פרקים</button>
-  <button data-tab="msgs"><span class="i">💬</span>הודעות</button>
+  <button data-tab="contacts"><span class="i">📩</span>פניות<span class="dot" id="contactDot" hidden></span></button>
+  <button data-tab="msgs"><span class="i">📢</span>הודעות</button>
   <button data-tab="log"><span class="i">📜</span>יומן</button>
   <button data-tab="settings"><span class="i">⚙️</span>הגדרות</button>
 </nav>
@@ -315,6 +328,7 @@ function renderCustomers() {
         </div>
         ${custStatus(c)}
       </div>
+      ${contactChips(c)}
       ${c.status === 'blocked'
         ? `<div class="err" style="margin-top:10px">נחסם: ${esc(c.blockedReason || '')}</div>`
         : c.wa.linked
@@ -329,6 +343,115 @@ function renderCustomers() {
     </div>`;
   }).join('') || '<div class="empty">לא נמצאו לקוחות</div>';
 }
+
+function contactChips(c) {
+  const chips = [];
+  const ct = c.contact;
+  if (ct?.stage === 'pending') chips.push(`<span class="chip gold" data-act="contactSheet" data-id="${c.id}">📩 הודעה חדשה${c.status === 'blocked' ? ' מהלקוח החסום' : ''}</span>`);
+  if (ct?.stage === 'chat') chips.push(`<span class="chip blue" data-act="contactSheet" data-id="${c.id}">💬 בשיחה עם המנהל</span>`);
+  if (ct?.stage === 'write') chips.push(`<span class="chip">✍️ ${ct.origin === 'blocked' ? 'יכול לכתוב למנהל' : 'פתח פנייה'}</span>`);
+  if (c.status === 'blocked' && c.contactClosed) chips.push('<span class="chip">🔒 סגור לפניות</span>');
+  if (c.manager) chips.push(`<span class="chip ${c.manager.state === 'in' ? 'ok' : 'warn'}" data-act="mgrSheet" data-id="${c.id}">👑 ${c.manager.state === 'in' ? 'המנהל בקבוצה' : 'המנהל הוזמן'}</span>`);
+  return chips.length ? `<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">${chips.join('')}</div>` : '';
+}
+
+const when = (t) => t ? new Date(t).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+const msgHtml = (m) => m ? (m.text ? waFormat(m.text) : `<i>${m.media ? '📎 קובץ (' + esc(m.media) + ')' : '…'}</i>`) : '';
+const originChip = (c) => c.contact?.origin === 'blocked' || c.status === 'blocked' ? '<span class="chip bad">⛔ חסום</span>' : '<span class="chip blue">✉️ פנייה</span>';
+const OUTCOMES = { rejected: '✖ נדחתה', disabled: '🔒 נסגרה האפשרות', unblocked: '✅ החסימה בוטלה', 'blocked-after-chat': '⛔ נשאר חסום', closed: '✔ השיחה נסגרה', blocked: '⛔ נחסם' };
+
+function renderContacts() {
+  const pending = state.customers.filter((c) => c.contact?.stage === 'pending').sort((a, b) => b.contact.message.at - a.contact.message.at);
+  const chats = state.customers.filter((c) => c.contact?.stage === 'chat');
+  const writing = state.customers.filter((c) => c.contact?.stage === 'write');
+  const card = (c, extra = '') => `<div class="card contact ${c.contact.stage === 'pending' ? 'new' : ''}" data-act="contactSheet" data-id="${c.id}">
+      <div class="row"><b class="grow">${esc(c.name)}</b>${originChip(c)}</div>
+      ${c.contact.message ? `<div class="bubble in">${msgHtml(c.contact.message)}</div>` : ''}
+      <div class="row small muted" style="margin-top:6px"><span class="grow">${extra}</span></div>
+    </div>`;
+  const section = (title, html) => `<h3 class="ttl" style="margin:16px 4px 8px">${title}</h3>${html}`;
+  let html = '';
+  html += section(`📩 פניות חדשות ${pending.length ? `<span class="chip gold">${pending.length}</span>` : ''}`,
+    pending.map((c) => card(c, `התקבלה ${when(c.contact.message.at)} · לחץ לפתיחה`)).join('') || '<div class="muted small" style="padding:0 4px">אין פניות חדשות.</div>');
+  if (chats.length) html += section('💬 שיחות פתוחות', chats.map((c) => card(c, `נפתחה ${when(c.contact.openedAt)}${c.contact.managerInvited ? ' · ⏳ נשלחה לך הזמנה בוואטסאפ' : ''}`)).join(''));
+  if (writing.length) html += section('✍️ יכולים לכתוב עכשיו', writing.map((c) => card(c, c.contact.origin === 'blocked' ? 'חסום, עוד לא כתב למנהל' : `פתח פנייה ${when(c.contact.createdAt)}, עוד לא כתב`)).join(''));
+  html += section('📚 היסטוריה', (state.contactHistory || []).map((h) => `<div class="card">
+      <div class="row"><b class="grow">${esc(h.name)}</b><span class="chip">${OUTCOMES[h.outcome] || esc(h.outcome)}</span></div>
+      <div class="bubble in">${msgHtml(h)}</div>
+      <div class="small muted" style="margin-top:6px">${h.origin === 'blocked' ? '⛔ מלקוח חסום' : '✉️ פנייה'} · נשלחה ${when(h.at)}${h.chatAt ? ` · שיחה ${when(h.chatAt)}` : ''} · נסגרה ${when(h.closedAt)}</div>
+    </div>`).join('') || '<div class="muted small" style="padding:0 4px">אין עדיין.</div>');
+  $('contacts').innerHTML = html;
+}
+
+function contactSheet(id) {
+  const c = custById(id), ct = c?.contact;
+  if (!ct) return toast('אין פנייה פתוחה', true);
+  const blocked = c.status === 'blocked';
+  const head = `<h2>${ct.stage === 'chat' ? '💬 שיחה עם' : '📩 פנייה של'} ${esc(c.name)}</h2><div class="row" style="gap:6px">${originChip(c)}<span class="muted small ltr">+${esc(c.phone)}</span></div>`;
+  const msg = ct.message ? `<div class="bubble in" style="margin:12px 0">${msgHtml(ct.message)}</div><div class="muted small" style="margin-bottom:12px">נשלחה ${when(ct.message.at)}</div>` : '';
+  let body;
+  if (ct.stage === 'pending') {
+    body = `<div class="btn-col">
+      <button class="btn gold block" data-act="contactDo" data-do="open" data-id="${id}">💬 פתיחת שיחה</button>
+      <button class="btn danger block" data-act="contactDo" data-do="reject" data-id="${id}">✖ דחייה וסגירת השיחה לגמרי</button></div>
+      <p class="muted small">פתיחת שיחה: הקבוצה ${blocked ? 'של החסימה' : '"פנייה למנהל"'} נמחקת אצלו, ונפתחת "שיחה עם המנהל" שאתה מצורף אליה כאדמין. ההודעה שלו נשלחת שם.</p>`;
+  } else if (ct.stage === 'chat') {
+    body = `<div class="status-box"><div>💬 השיחה נפתחה ${when(ct.openedAt)}</div>${ct.managerInvited ? '<div>⏳ נשלחה לך הזמנה בצ׳אט פרטי מהלקוח. אחרי שתצטרף, בסנכרון תהפוך לאדמין.</div>' : ''}</div>
+      <div class="btn-col">${blocked
+        ? `<button class="btn gold block" data-act="contactDo" data-do="unblock" data-id="${id}">✅ ביטול חסימה וסגירת השיחה</button>
+           <button class="btn danger block" data-act="contactDo" data-do="keep" data-id="${id}">⛔ סגירת השיחה, החסימה נשארת</button>`
+        : `<button class="btn gold block" data-act="contactDo" data-do="close" data-id="${id}">✔ סגירת השיחה</button>
+           <button class="btn danger block" data-act="contactDo" data-do="block" data-id="${id}">⛔ סגירת השיחה וחסימה</button>`}
+        <button class="btn ghost block" data-act="sync" data-id="${id}">🔄 בדיקת מצב (סנכרון)</button></div>`;
+  } else {
+    body = `<div class="status-box">⏳ ${blocked ? 'הלקוח חסום ויכול לכתוב הודעה אחת בקבוצת החסימה.' : 'נפתחה לו קבוצת "פנייה למנהל".'} עוד לא כתב. ההודעה תופיע כאן בסנכרון אחרי שיכתוב.</div>
+      <div class="btn-col"><button class="btn ghost block" data-act="sync" data-id="${id}">🔄 בדיקה עכשיו (סנכרון)</button>
+      ${blocked ? `<button class="btn danger block" data-act="contactDo" data-do="disable" data-id="${id}">🔒 סגירת האפשרות לפנות</button>` : ''}</div>`;
+  }
+  openSheet(head + msg + body);
+}
+
+const CONTACT_CONFIRM = {
+  open: (c) => `לפתוח שיחה עם ${c.name}?`,
+  reject: (c) => `לדחות את הפנייה של ${c.name}?\nתישלח לו הודעה שהפנייה נדחתה${c.status === 'blocked' ? ', והוא לא יוכל לפנות שוב' : ''}.`,
+  disable: (c) => `לסגור ל${c.name} את האפשרות לפנות?\nקבוצת החסימה תהפוך לקריאה בלבד.`,
+  unblock: (c) => `לבטל את החסימה של ${c.name} ולסגור את השיחה?\nהשיחה תימחק אצלו, ותיווצר לו קבוצת פרקים חדשה.`,
+  keep: (c) => `לסגור את השיחה עם ${c.name} ולהשאיר אותו חסום?\nהשיחה תימחק אצלו, ותיפתח קבוצת חסימה לקריאה בלבד. הוא לא יוכל לפנות שוב.`,
+  close: (c) => `לסגור את השיחה עם ${c.name}?\nהקבוצה "שיחה עם המנהל" תימחק אצלו.`,
+  block: (c) => `לסגור את השיחה ולחסום את ${c.name}?\nקבוצת הפרקים והשיחה יימחקו, ותיפתח קבוצת חסימה לקריאה בלבד.`,
+};
+
+function mgrSheet(id) {
+  const c = custById(id), m = c.manager;
+  if (!m) return;
+  let box, btns;
+  if (m.state === 'invited') {
+    const validity = m.canceled ? '⚠ הלקוח ביטל את ההזמנה. הוא ייחסם בסנכרון'
+      : !m.valid ? '⛔ ההזמנה כבר לא בתוקף. אפשר לשלוח מחדש'
+      : m.expiresAt ? `✅ בתוקף עד ${when(m.expiresAt)}` : '✅ בתוקף (קישור הקבוצה)';
+    box = `<div>📨 נשלחה לך הזמנה בצ׳אט פרטי מהלקוח, ${when(m.invitedAt)}</div><div>${validity}</div>
+      <div class="muted small">כשתצטרף, זה יתעדכן כאן בסנכרון.</div>`;
+    btns = `<button class="btn ghost block" data-act="sync" data-id="${id}">🔄 בדיקת מצב (סנכרון)</button>
+      <button class="btn block" data-act="mgrDo" data-do="resend" data-id="${id}">📨 שליחה מחדש של ההזמנה</button>
+      <button class="btn danger block" data-act="mgrDo" data-do="cancel" data-id="${id}">✖ ביטול ההזמנה</button>`;
+  } else {
+    box = `<div>✅ המנהל בקבוצה${m.joinedAt ? ' מאז ' + when(m.joinedAt) : ''}</div><div>${m.admin ? '⭐ אדמין בקבוצה' : 'משתתף רגיל (לא אדמין)'}</div>
+      <div class="muted small">אל תצא לבד מהקבוצה: המערכת תחשוב שהלקוח הוציא אותך ותחסום אותו. מוציאים רק מכאן.</div>`;
+    btns = `${m.admin
+        ? `<button class="btn block" data-act="mgrDo" data-do="unadmin" data-id="${id}">הסרת האדמין</button>`
+        : `<button class="btn gold block" data-act="mgrDo" data-do="admin" data-id="${id}">⭐ הפיכת המנהל לאדמין משני</button>`}
+      <button class="btn danger block" data-act="mgrDo" data-do="remove" data-id="${id}">🚪 הוצאת המנהל מהקבוצה</button>
+      <button class="btn ghost block" data-act="sync" data-id="${id}">🔄 בדיקת מצב (סנכרון)</button>`;
+  }
+  openSheet(`<h2>👑 המנהל בקבוצה של ${esc(c.name)}</h2><div class="status-box">${box}</div><div class="btn-col">${btns}</div>`);
+}
+
+const MGR_CONFIRM = {
+  cancel: 'לבטל את ההזמנה? ההודעה עם ההזמנה תימחק, וזה לא ייחשב הפרה של הלקוח.',
+  resend: 'לבטל את ההזמנה הנוכחית ולשלוח הזמנה חדשה?',
+  remove: 'להוציא את המנהל מהקבוצה? זה לא ייחשב הפרה של הלקוח.',
+  admin: 'להפוך את המנהל לאדמין בקבוצה?\nשים לב: אם תשנה את השם, התיאור או התמונה של הקבוצה, או תצרף מישהו, הלקוח ייחסם.',
+};
 
 function epChips(e) {
   const chips = e.type === 'drive' ? ['<span class="chip warn">🔗 ישן מדרייב</span>'] : [];
@@ -403,6 +526,8 @@ function renderTop() {
   $('jobLast').textContent = j.current ? j.progress || (j.log.at(-1) || '').replace(/^\S+\s+/, '') : 'כשמסיימים לסנכרן אפשר לעצור את הבוט מהאפליקציה';
   const reqs = state.customers.reduce((s, c) => s + c.requests, 0);
   $('reqDot').hidden = !reqs; $('reqDot').textContent = reqs;
+  const newContacts = state.customers.filter((c) => c.contact?.stage === 'pending').length;
+  $('contactDot').hidden = !newContacts; $('contactDot').textContent = newContacts;
   const log = $('log');
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
   log.textContent = j.log.join('\n') || 'אין עדיין רשומות.';
@@ -426,7 +551,7 @@ async function load() {
     if (raw === lastRaw) return;
     lastRaw = raw;
     state = JSON.parse(raw);
-    renderTop(); renderCustomers(); renderEpisodes(); renderNotices();
+    renderTop(); renderCustomers(); renderEpisodes(); renderNotices(); renderContacts();
   } catch {}
 }
 
@@ -514,7 +639,11 @@ function custMenu(id) {
     ${!c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="connect" data-id="${id}">📱 חיבור וואטסאפ</button>` : ''}
     ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resetGroup" data-id="${id}">♻️ איפוס הקבוצה</button>` : ''}
     ${c.canMessage ? `<button class="menu-item" data-act="msgOne" data-id="${id}">💬 שליחת הודעה</button>` : ''}
-    ${c.canMessage ? `<button class="menu-item" data-act="addMgr" data-id="${id}">👑 צירוף המנהל לקבוצה</button>` : ''}
+    ${c.contact ? `<button class="menu-item" data-act="contactSheet" data-id="${id}">${c.contact.stage === 'chat' ? '💬 השיחה עם המנהל' : c.contact.stage === 'pending' ? '📩 ההודעה ששלח למנהל' : '✍️ הפנייה למנהל'}</button>` : ''}
+    ${c.status === 'blocked' && (c.contact?.stage === 'write' || c.contact?.stage === 'pending') ? `<button class="menu-item red" data-act="contactDo" data-do="disable" data-id="${id}">🔒 סגירת האפשרות לפנות</button>` : ''}
+    ${c.canMessage ? (c.manager
+      ? `<button class="menu-item" data-act="mgrSheet" data-id="${id}">👑 ${c.manager.state === 'in' ? 'המנהל בקבוצה' : 'הזמנת המנהל'}</button>`
+      : `<button class="menu-item" data-act="addMgr" data-id="${id}">👑 צירוף המנהל לקבוצה</button>`) : ''}
     <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
     ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
     ${c.status !== 'blocked' ? `<button class="menu-item red" data-act="blockCust" data-id="${id}">⛔ חסימה</button>` : `<button class="menu-item" data-act="unblock" data-id="${id}">✅ ביטול חסימה</button>`}
@@ -615,7 +744,7 @@ async function copyText(text) {
 // ---------------------------------------------------------------- actions
 const actions = {
   syncAll: () => run(api('POST', '/api/sync-all'), (r) => r.count ? `🔄 סנכרון של ${r.count} לקוחות התחיל` : 'אין לקוחות מחוברים'),
-  sync: (b) => run(api('POST', `/api/customers/${b.dataset.id}/sync`), (r) => r.queued ? '🔄 הסנכרון התחיל' : 'כבר בתור'),
+  sync: (b) => closeSheet() || run(api('POST', `/api/customers/${b.dataset.id}/sync`), (r) => r.queued ? '🔄 הסנכרון התחיל' : 'כבר בתור'),
   unblock: (b) => confirm('לבטל את החסימה? קבוצת החסימה תימחק, תיווצר קבוצת פרקים חדשה, וכל הפרקים יישלחו.') && run(api('POST', `/api/customers/${b.dataset.id}/unblock`), 'ביטול החסימה התחיל'),
   connect: (b) => connectSheet(b.dataset.id),
   pair: (b) => run(api('POST', `/api/customers/${b.dataset.id}/wa/pair`), 'מבקש קוד…'),
@@ -638,12 +767,27 @@ const actions = {
   saveMgr: () => run(api('PUT', '/api/settings', { managerPhone: $('mgrPhone').value }), 'נשמר ✓'),
   addMgr: (b) => {
     const c = custById(b.dataset.id);
+    if (!confirm(`לצרף את המנהל לקבוצה של ${c.name}?\nאם אי אפשר לצרף ישירות, תישלח לך הזמנה בצ׳אט פרטי מהלקוח.\nמרגע זה, הוצאת המנהל או ביטול ההזמנה יגרמו לחסימה של הלקוח.`)) return;
     closeSheet();
-    run(api('POST', `/api/customers/${c.id}/add-manager`), `👑 מצרף את המנהל לקבוצה של ${c.name}…`);
+    run(api('POST', `/api/customers/${c.id}/manager/add`), `👑 מצרף את המנהל לקבוצה של ${c.name}…`);
+  },
+  mgrSheet: (b) => mgrSheet(b.dataset.id),
+  mgrDo: (b) => {
+    const q = MGR_CONFIRM[b.dataset.do];
+    if (q && !confirm(q)) return;
+    closeSheet();
+    run(api('POST', `/api/customers/${b.dataset.id}/manager/${b.dataset.do}`), 'בתור ✓ (תוצאה ביומן)');
+  },
+  contactSheet: (b) => contactSheet(b.dataset.id),
+  contactDo: (b) => {
+    const c = custById(b.dataset.id);
+    if (!confirm(CONTACT_CONFIRM[b.dataset.do](c))) return;
+    closeSheet();
+    run(api('POST', `/api/customers/${c.id}/contact/${b.dataset.do}`), 'בתור ✓ (תוצאה ביומן)');
   },
   blockCust: (b) => {
     const c = custById(b.dataset.id);
-    if (!confirm(`לחסום את ${c.name}?\nהקבוצה שלו תימחק, ותיווצר לו קבוצת "נחסמת" עם הודעה. רק אתה תוכל לבטל.`)) return;
+    if (!confirm(`לחסום את ${c.name}?\nהקבוצה שלו תימחק, ותיווצר לו קבוצת "נחסמת" עם הודעה, שבה הוא יכול לכתוב לך הודעה אחת. רק אתה תוכל לבטל.`)) return;
     closeSheet();
     run(api('POST', `/api/customers/${c.id}/block`), '⛔ החסימה התחילה');
   },

@@ -10,6 +10,15 @@ import {
   deleteNotice,
   deliveredCount,
   addManager,
+  cancelManagerInvite,
+  closeChat,
+  disableContact,
+  openChat,
+  queueContact,
+  rejectContact,
+  removeManager,
+  resendManagerInvite,
+  setManagerAdmin,
   queueBlock,
   queueLogout,
   queueNotice,
@@ -87,8 +96,41 @@ function customerView(c) {
     requests: (c.inbox || []).length,
     resetPending: !!c.resetPending,
     canMessage: c.status !== "blocked" && !!c.groupJid && customerSession(c.id).isLinked(),
-    inviteLink: c.inviteLink || null,
+    manager: managerView(c),
+    contact: c.contact
+      ? {
+          stage: c.contact.stage,
+          origin: c.contact.origin,
+          message: c.contact.message ? { text: c.contact.message.text, media: c.contact.message.media, at: c.contact.message.at } : null,
+          createdAt: c.contact.createdAt,
+          openedAt: c.contact.openedAt || null,
+          managerInvited: !!c.contact.managerInvite,
+        }
+      : null,
+    contactClosed: !!c.contactClosed,
     wa: { state: s.state, linked: s.linked, error: s.error },
+  };
+}
+
+function managerView(c) {
+  const m = c.manager;
+  if (!m) return null;
+  const inv = m.invite;
+  // A link invite works while the group link is the one sent; a one-time invite until it expires.
+  const valid =
+    m.state === "invited" &&
+    !m.canceledByCustomer &&
+    (inv?.kind === "link" ? inv.code === c.inviteCode : !inv?.expiresAt || inv.expiresAt > Date.now());
+  return {
+    state: m.state,
+    via: m.via,
+    invitedAt: m.invitedAt || null,
+    expiresAt: inv?.expiresAt || null,
+    inviteKind: inv?.kind || null,
+    valid,
+    canceled: !!m.canceledByCustomer,
+    joinedAt: m.joinedAt || null,
+    admin: !!m.admin,
   };
 }
 
@@ -141,6 +183,7 @@ route("GET", /^\/api\/state$/, () => ({
   storage: storageInfo(),
   settings: settings(),
   notices: (db().notices || []).slice(-20).reverse(),
+  contactHistory: (db().contactHistory || []).slice(-50).reverse(),
 }));
 
 // Delete a sent message from the groups it reached.
@@ -165,9 +208,39 @@ route("DELETE", /^\/api\/notices\/([\w-]+)$/, (_req, [id]) => {
 });
 
 // Adds the manager to a customer's episodes group (or sends the manager an invite).
-route("POST", /^\/api\/customers\/([\w-]+)\/add-manager$/, (_req, [id]) => {
+// The manager in a customer's episodes group: add / invite, cancel or resend the invite,
+// remove, make admin.
+const managerActions = {
+  add: ["צירוף המנהל לקבוצה", (c) => addManager(c)],
+  cancel: ["ביטול ההזמנה של המנהל", (c) => cancelManagerInvite(c)],
+  resend: ["שליחה מחדש של ההזמנה למנהל", (c) => resendManagerInvite(c)],
+  remove: ["הוצאת המנהל מהקבוצה", (c) => removeManager(c)],
+  admin: ["המנהל אדמין", (c) => setManagerAdmin(c, true)],
+  unadmin: ["הסרת האדמין של המנהל", (c) => setManagerAdmin(c, false)],
+};
+route("POST", /^\/api\/customers\/([\w-]+)\/manager\/(\w+)$/, (_req, [id, action]) => {
   const c = mustCustomer(id);
-  return { queued: enqueue(`addmgr:${id}`, `צירוף המנהל לקבוצה של ${customerName(c)}`, () => addManager(c)) };
+  const a = managerActions[action];
+  if (!a) throw new Error("פעולה לא מוכרת");
+  return { queued: enqueue(`mgr:${id}`, `${a[0]} – ${customerName(c)}`, () => a[1](c)) };
+});
+
+// A customer's message to the manager: open a chat, reject, close the option, end the chat.
+const contactActions = {
+  open: ["פתיחת שיחה", (c) => openChat(c)],
+  reject: ["דחיית פנייה", (c) => rejectContact(c)],
+  disable: ["סגירת האפשרות לפנות", (c) => disableContact(c)],
+  unblock: ["סגירת שיחה וביטול חסימה", (c) => closeChat(c, "unblock")],
+  keep: ["סגירת שיחה, החסימה נשארת", (c) => closeChat(c, "keep")],
+  close: ["סגירת שיחה", (c) => closeChat(c, "close")],
+  block: ["סגירת שיחה וחסימה", (c) => closeChat(c, "block")],
+};
+route("POST", /^\/api\/customers\/([\w-]+)\/contact\/(\w+)$/, (_req, [id, action]) => {
+  const c = mustCustomer(id);
+  const a = contactActions[action];
+  if (!a) throw new Error("פעולה לא מוכרת");
+  if (!c.contact) throw new Error("אין פנייה פתוחה");
+  return { queued: queueContact(c, a[0], () => a[1](c)) };
 });
 
 // Messages from the manager to customers' groups, with a small history.
@@ -404,6 +477,7 @@ const RESET_FLAGS = [
   "resetForThumbDone",
   "resetForNoDeleteRuleDone",
   "resetForInviteRuleDone",
+  "resetForContactDone",
 ];
 if (RESET_FLAGS.some((f) => !settings()[f])) {
   resetAllOnNextSync();

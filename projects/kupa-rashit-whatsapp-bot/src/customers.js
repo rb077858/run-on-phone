@@ -3,7 +3,18 @@
 import { generateMessageIDV2, getBinaryNodeChild, getContentType, jidNormalizedUser, normalizeMessageContent, proto } from "baileys";
 import {
   BLOCKED_GROUP_NAME,
+  CHAT_GROUP_NAME,
+  CHAT_OPENED,
+  CONTACT_DISABLED,
+  CONTACT_ONLY_FIRST,
+  CONTACT_RECEIVED,
+  CONTACT_WORD,
   EPISODES_GROUP_DESC,
+  MANAGER_ADDED,
+  MANAGER_INVITED,
+  REQUEST_GROUP_MESSAGE,
+  REQUEST_GROUP_NAME,
+  contactRejected,
   BLOCKED_LOGO,
   EPISODES_GROUP_NAME,
   GROUP_LOGO,
@@ -11,7 +22,7 @@ import {
   blockedMessage,
   noticeText,
 } from "./config.js";
-import { db, findEpisode, getCustomer, normalizePhone, save, settings, sortedEpisodes, sourceKey } from "./db.js";
+import { db, findEpisode, getCustomer, newId, normalizePhone, save, settings, sortedEpisodes, sourceKey } from "./db.js";
 import { firstUpload, forgetRefChecks, mediaPlan, sendParts } from "./delivery.js";
 import { addLog, enqueue } from "./jobs.js";
 import { numberOf, session, sleep } from "./wa.js";
@@ -124,6 +135,7 @@ async function createEpisodesGroup(c, sock) {
   c.deletedByCustomer = [];
   c.inviteLink = null;
   c.inviteCode = null;
+  c.manager = null;
   save();
   await applyGroupLogo(c, sock);
   await rememberInviteCode(c, sock);
@@ -193,8 +205,26 @@ async function violations(c, sock, meta) {
   if (norm(meta.desc) !== norm(c.groupDesc ?? EPISODES_GROUP_DESC)) reasons.push("תיאור הקבוצה שונה");
   // Everyone but the customer, except the manager (who may join a customer's group).
   const added = [];
-  for (const p of meta.participants) if (!(await isManager(sock, p))) added.push(p);
+  let mgr = null;
+  for (const p of meta.participants) {
+    if (await isManager(sock, p)) mgr = p;
+    else added.push(p);
+  }
   if (added.length > 1) reasons.push(`צורפו ${added.length - 1} משתתפים לקבוצה`);
+  // Once the manager is in (or invited), the system expects them to stay.
+  if (mgr) {
+    if (c.manager?.state !== "in") {
+      c.manager = { ...(c.manager || { via: "joined" }), state: "in", joinedAt: Date.now() };
+      addLog(`👑 ${customerName(c)}: המנהל בקבוצה`);
+    }
+    c.manager.admin = !!mgr.admin;
+    c.manager.pid = mgr.id;
+    save();
+  } else if (c.manager?.state === "in") {
+    reasons.push("המנהל הוצא מהקבוצה");
+  } else if (c.manager?.canceledByCustomer) {
+    reasons.push("ההזמנה של המנהל לקבוצה בוטלה");
+  }
   const pic = await groupPictureId(sock, meta.id);
   if (pic) {
     if (c.pictureId && pic.id !== c.pictureId) reasons.push(pic.id ? "תמונת הקבוצה הוחלפה" : "תמונת הקבוצה נמחקה");
@@ -300,9 +330,14 @@ function onCustomerDeletes(s, item) {
 
 function onCustomerMessages(s, { messages }) {
   const c = getCustomer(s.id);
-  if (!c?.groupJid) return;
+  if (!c) return;
   let changed = false;
   for (const m of messages) {
+    if (onContactMessage(c, m)) {
+      changed = true;
+      continue;
+    }
+    if (!c.groupJid) continue;
     // Only the customer's own messages (their account): the manager may be in the group too.
     if (m.key.remoteJid !== c.groupJid || !m.message || !m.key.fromMe) continue;
     const content = normalizeMessageContent(m.message);
@@ -350,6 +385,11 @@ async function handleInbox(c, sock) {
   const name = customerName(c);
   for (const req of c.inbox || []) {
     if (req.key) await deleteSent(sock, c.groupJid, req); // keep the group videos-only
+    if (CONTACT_WORD.test(req.text || "")) {
+      if (c.contact) addLog(`  ${name}: כתב "פנייה", אבל כבר יש לו פנייה פתוחה`);
+      else await openRequestGroup(c, sock);
+      continue;
+    }
     const ep = requestedEpisode(c, req);
     if (!ep) {
       if (req.text) addLog(`  ${name}: הודעה בקבוצה שלא הובנה ("${req.text.slice(0, 40)}"), נמחקה`);
@@ -393,8 +433,19 @@ export function deliveredCount(c) {
 
 export async function syncCustomer(c) {
   const name = customerName(c);
-  if (c.status === "blocked") return addLog(`⏭ ${name}: חסום, מדלג`);
   const s = customerSession(c.id);
+  if (c.status === "blocked") {
+    // Blocked: only their message to the manager, or the chat with the manager.
+    if (!c.contact || !s.isLinked()) return addLog(`⏭ ${name}: חסום, מדלג`);
+    return s.use(async (sock) => {
+      await s.waitOfflineMessages();
+      if (contactOpen(c)) await checkContact(c, sock);
+      else await promoteManagerInChat(c, sock);
+      c.lastSync = Date.now();
+      save();
+      addLog(`✔ ${name}: נבדק (חסום)`);
+    });
+  }
   if (!s.isLinked()) return addLog(`⏭ ${name}: וואטסאפ לא מחובר, מדלג`);
 
   await s.use(async (sock) => {
@@ -442,7 +493,14 @@ export async function syncCustomer(c) {
 
     if (c.welcome && Date.now() - (c.welcome.pinnedAt || 0) > 25 * 86400_000) await pinWelcome(c, sock);
 
+    if (c.manager?.state === "in" && !c.manager.noticeMsg) {
+      c.manager.noticeMsg = await sendGroupText(c, sock, MANAGER_ADDED);
+      save();
+    }
+
     await handleInbox(c, sock);
+    if (contactOpen(c)) await checkContact(c, sock);
+    else if (c.contact?.stage === "chat") await promoteManagerInChat(c, sock);
 
     // Messages of deleted/changed episodes, duplicates and leftovers of a different split.
     const episodes = new Map(db().episodes.map((e) => [e.id, e]));
@@ -515,9 +573,10 @@ const selfIds = (sock) => new Set([sock.user?.id, sock.user?.lid].filter(Boolean
 
 async function block(c, sock, meta, reasons, kind = "violation") {
   const name = customerName(c);
-  addLog(`⛔ ${name}: ${kind === "violation" ? "הפרת כללים – " : ""}${reasons.join(", ")}. חוסם.`);
+  if (kind !== "final") addLog(`⛔ ${name}: ${kind === "violation" ? "הפרת כללים – " : ""}${reasons.join(", ")}. חוסם.`);
   const jid = c.groupJid;
   meta ??= { participants: [] };
+  if (c.contact) await dropContactGroups(c, sock, kind === "final" ? "blocked-after-chat" : "blocked");
 
   const me = selfIds(sock);
   // Only when someone was added: with one participant, that one is the customer.
@@ -548,9 +607,17 @@ async function block(c, sock, meta, reasons, kind = "violation") {
   // on their phone so they can read it, but they can't write in it.
   const blockJid = await createLockedGroup(sock, BLOCKED_GROUP_NAME);
   await tryDo("blocked picture", () => setGroupPicture(sock, blockJid, BLOCKED_LOGO));
-  const msg = await sock.sendMessage(blockJid, { text: blockedMessage(kind) });
-  await sleep(1500);
-  await tryDo("leave block group", () => sock.groupLeave(blockJid));
+  const msgId = generateMessageIDV2(sock.user?.id);
+  botTextIds.add(msgId);
+  const msg = await sock.sendMessage(blockJid, { text: blockedMessage(kind) }, { messageId: msgId });
+  const blockMsg = { key: msg.key, timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000) };
+  // The customer may write one message to the manager there. After a chat with the manager
+  // the block is final: the bot leaves, so the group is read-only.
+  const final = kind === "final";
+  if (final) {
+    await sleep(1500);
+    await tryDo("leave block group", () => sock.groupLeave(blockJid));
+  }
   Object.assign(c, {
     status: "blocked",
     blockedReason: reasons.join(", "),
@@ -562,11 +629,20 @@ async function block(c, sock, meta, reasons, kind = "violation") {
     deletedByCustomer: [],
     inviteLink: null,
     inviteCode: null,
+    manager: null,
     blockGroupJid: blockJid,
-    blockMsg: { key: msg.key, timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000) },
+    blockMsg,
+    contact: final
+      ? null
+      : { stage: "write", origin: "blocked", groupJid: blockJid, createdAt: Date.now(), botIds: [msgId], last: blockMsg },
+    contactClosed: final,
   });
   save();
-  addLog(`⛔ ${name}: נחסם. הקבוצה נמחקה, ונשארה לו קבוצת "${BLOCKED_GROUP_NAME}" עם ההודעה, לקריאה בלבד`);
+  addLog(
+    final
+      ? `⛔ ${name}: נחסם סופית. נשארה לו קבוצת "${BLOCKED_GROUP_NAME}" לקריאה בלבד`
+      : `⛔ ${name}: נחסם. הקבוצה נמחקה, ונפתחה לו קבוצת "${BLOCKED_GROUP_NAME}" שבה אפשר לכתוב הודעה אחת למנהל`,
+  );
 }
 
 export async function unblockCustomer(c) {
@@ -578,9 +654,17 @@ export async function unblockCustomer(c) {
     return addLog(`✔ ${name}: החסימה בוטלה`);
   }
   await customerSession(c.id).use(async (sock) => {
-    // Already left when blocked; this deletes the chat (and leaves, for blocks from older versions).
+    if (c.contact) await dropContactGroups(c, sock, "unblocked");
+    // Leaves the "blocked" group (if still in it) and deletes the chat.
     if (c.blockGroupJid) await leaveAndDeleteChat(sock, c.blockGroupJid, c.blockMsg?.key, c.blockMsg?.timestamp);
-    Object.assign(c, { status: "active", blockGroupJid: null, blockMsg: null, blockedReason: null, blockedAt: null });
+    Object.assign(c, {
+      status: "active",
+      blockGroupJid: null,
+      blockMsg: null,
+      blockedReason: null,
+      blockedAt: null,
+      contactClosed: false,
+    });
     await createEpisodesGroup(c, sock);
     addLog(`✔ ${name}: החסימה בוטלה, נוצרה קבוצה חדשה`);
   });
@@ -607,7 +691,8 @@ export function queueSync(c) {
 
 export function queueSyncAll() {
   forgetRefChecks();
-  const list = db().customers.filter((c) => c.status !== "blocked" && customerSession(c.id).isLinked());
+  // Blocked customers too, while they may write to the manager or chat with them.
+  const list = db().customers.filter((c) => (c.status !== "blocked" || c.contact) && customerSession(c.id).isLinked());
   for (const c of list) queueSync(c);
   return list.length;
 }
@@ -654,50 +739,385 @@ async function renewInviteLink(c, sock) {
   return true;
 }
 
+// ------------------------------------------------- the manager in the episodes group
+const managerJidOf = () => {
+  const n = normalizePhone(settings().managerPhone);
+  return n ? `${n}@s.whatsapp.net` : null;
+};
+
+function mustManager(c) {
+  const jid = managerJidOf();
+  if (!jid) throw new Error("לא הוגדר מספר מנהל (הגדרות ← מספר המנהל)");
+  if (jid === `${normalizePhone(c.phone)}@s.whatsapp.net`) throw new Error("המספר של הלקוח הוא מספר המנהל");
+  return jid;
+}
+
+async function findManagerIn(sock, jid) {
+  const meta = await groupMeta(sock, jid);
+  if (!meta) return null;
+  for (const p of meta.participants) if (await isManager(sock, p)) return p;
+  return null;
+}
+
+const keyOf = (msg) => (msg ? { key: msg.key, timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000) } : null);
+
+/** A bot message in the episodes group that the customer must not delete. */
+async function sendGroupText(c, sock, text) {
+  const messageId = generateMessageIDV2(sock.user?.id);
+  botTextIds.add(messageId);
+  c.noticeIds = [...(c.noticeIds || []), messageId].slice(-50);
+  save();
+  return keyOf(await tryDo("group text", () => sock.sendMessage(c.groupJid, { text }, { messageId })));
+}
+
 /**
- * Adds the manager (settings.managerPhone) to the customer's episodes group. If WhatsApp
- * doesn't allow adding them (their privacy settings), an invite to the group is sent to
- * the manager instead, from the customer's account.
+ * Adds the manager to a group. If WhatsApp doesn't allow it (the manager's privacy
+ * settings), sends them an invite in a private chat instead, from the customer's account.
+ * Returns { added: true }, or the invite: { kind, code, expiresAt, msg }.
  */
+async function addOrInviteManager(sock, jid, subject, text, linkCode) {
+  const managerJid = managerJidOf();
+  const [res] = await sock.groupParticipantsUpdate(jid, [managerJid], "add");
+  if (res?.status === "200" || res?.status === "409") return { added: true };
+  // WhatsApp usually returns a one-time invite for exactly this; otherwise use the group link.
+  const req = res?.content && getBinaryNodeChild(res.content, "add_request");
+  let invite, sent;
+  if (req?.attrs?.code) {
+    const expiration = Number(req.attrs.expiration) || 0;
+    sent = await sock.sendMessage(managerJid, {
+      groupInvite: { inviteCode: req.attrs.code, inviteExpiration: expiration, jid, subject, text },
+    });
+    invite = { kind: "v4", code: req.attrs.code, expiresAt: expiration ? expiration * 1000 : null };
+  } else {
+    const code = linkCode || (await sock.groupInviteCode(jid));
+    sent = await sock.sendMessage(managerJid, { text: `${text}:\nhttps://chat.whatsapp.com/${code}` });
+    invite = { kind: "link", code, expiresAt: null };
+  }
+  addLog(`  אי אפשר לצרף את המנהל ישירות (קוד ${res?.status || "?"}), נשלחה לו הזמנה בצ'אט פרטי`);
+  return { ...invite, msg: keyOf(sent) };
+}
+
+/** Adds the manager (settings.managerPhone) to the customer's episodes group, or invites them. */
 export async function addManager(c) {
   const name = customerName(c);
   if (c.status === "blocked") throw new Error("הלקוח חסום");
   if (!c.groupJid) throw new Error("אין לו קבוצה עדיין. סנכרן קודם");
-  const manager = normalizePhone(settings().managerPhone);
-  if (!manager) throw new Error("לא הוגדר מספר מנהל (הגדרות ← מספר המנהל)");
-  if (manager === normalizePhone(c.phone)) throw new Error("המספר של הלקוח הוא מספר המנהל");
-  const managerJid = `${manager}@s.whatsapp.net`;
+  mustManager(c);
+  if (c.manager) throw new Error(c.manager.state === "in" ? "המנהל כבר בקבוצה" : "כבר נשלחה הזמנה. אפשר לבטל או לשלוח מחדש");
   await customerSession(c.id).use(async (sock) => {
     const meta = await groupMeta(sock, c.groupJid);
     if (!meta) throw new Error("הקבוצה לא קיימת. סנכרן כדי ליצור אותה מחדש");
-    for (const p of meta.participants) {
-      if (await isManager(sock, p)) return addLog(`👑 ${name}: המנהל כבר בקבוצה`);
-    }
-    const [res] = await sock.groupParticipantsUpdate(c.groupJid, [managerJid], "add");
-    if (res?.status === "200") return addLog(`👑 ${name}: המנהל צורף לקבוצה`);
-    if (res?.status === "409") return addLog(`👑 ${name}: המנהל כבר בקבוצה`);
-    // Can't add directly: send an invite. WhatsApp usually returns a one-time invite for
-    // exactly this; otherwise send the group's invite link.
-    const req = res?.content && getBinaryNodeChild(res.content, "add_request");
-    const text = `הזמנה לקבוצה "${EPISODES_GROUP_NAME}" של ${name}`;
-    if (req?.attrs?.code) {
-      await sock.sendMessage(managerJid, {
-        groupInvite: {
-          inviteCode: req.attrs.code,
-          inviteExpiration: Number(req.attrs.expiration) || 0,
-          jid: c.groupJid,
-          subject: meta.subject,
-          text,
-        },
-      });
-    } else {
-      const code = await sock.groupInviteCode(c.groupJid);
-      if (c.inviteCode && code !== c.inviteCode) throw new Error("קישור ההזמנה אופס בידי הלקוח. הוא ייחסם בסנכרון הבא");
-      await sock.sendMessage(managerJid, { text: `${text}:\nhttps://chat.whatsapp.com/${code}` });
-    }
-    addLog(`👑 ${name}: אי אפשר לצרף את המנהל ישירות (קוד ${res?.status || "?"}), נשלחה לו הזמנה לקבוצה בפרטי`);
+    let r = null;
+    for (const p of meta.participants) if (await isManager(sock, p)) r = { added: true, p };
+    r ??= await addOrInviteManager(sock, c.groupJid, meta.subject, `הזמנה לקבוצה "${EPISODES_GROUP_NAME}" של ${name}`, c.inviteCode);
+    c.manager = r.added
+      ? { state: "in", via: r.p ? "joined" : "added", joinedAt: Date.now(), admin: !!r.p?.admin, pid: r.p?.id }
+      : { state: "invited", via: "invite", invitedAt: Date.now(), invite: { kind: r.kind, code: r.code, expiresAt: r.expiresAt }, inviteMsg: r.msg };
+    save();
+    c.manager.noticeMsg = await sendGroupText(c, sock, r.added ? MANAGER_ADDED : MANAGER_INVITED);
+    save();
+    addLog(`👑 ${name}: ${r.p ? "המנהל כבר בקבוצה" : r.added ? "המנהל צורף לקבוצה" : "נשלחה למנהל הזמנה לקבוצה"}`);
   });
 }
+
+/** Cancels the manager's pending invite (the bot does it, so it isn't the customer's violation). */
+async function dropInvite(c, sock) {
+  const p = await findManagerIn(sock, c.groupJid);
+  if (p) {
+    Object.assign(c.manager, { state: "in", joinedAt: Date.now(), admin: !!p.admin, pid: p.id });
+    save();
+    throw new Error("המנהל כבר הצטרף לקבוצה");
+  }
+  const m = c.manager;
+  c.manager = null;
+  save();
+  if (m.invite?.kind === "v4") await tryDo("revoke invite", () => sock.groupRevokeInviteV4(c.groupJid, managerJidOf()));
+  else if (m.invite?.kind === "link") await tryDo("renew link", () => renewInviteLink(c, sock));
+  if (m.inviteMsg) await deleteSent(sock, m.inviteMsg.key.remoteJid, m.inviteMsg);
+  if (m.noticeMsg) await deleteSent(sock, c.groupJid, m.noticeMsg);
+}
+
+export async function cancelManagerInvite(c) {
+  if (c.manager?.state !== "invited") throw new Error("אין הזמנה פתוחה");
+  await customerSession(c.id).use((sock) => dropInvite(c, sock));
+  addLog(`✖ ${customerName(c)}: ההזמנה של המנהל בוטלה`);
+}
+
+export async function resendManagerInvite(c) {
+  if (c.manager?.state !== "invited") throw new Error("אין הזמנה פתוחה");
+  await customerSession(c.id).use((sock) => dropInvite(c, sock));
+  await addManager(c);
+}
+
+/** The bot removes the manager from the group (not a violation). */
+export async function removeManager(c) {
+  if (c.manager?.state !== "in") throw new Error("המנהל לא בקבוצה");
+  await customerSession(c.id).use(async (sock) => {
+    const p = await findManagerIn(sock, c.groupJid);
+    const m = c.manager;
+    c.manager = null;
+    save();
+    if (p) {
+      try {
+        await sock.groupParticipantsUpdate(c.groupJid, [p.id], "remove");
+      } catch (e) {
+        c.manager = m;
+        save();
+        throw e;
+      }
+    }
+    if (m.noticeMsg) await deleteSent(sock, c.groupJid, m.noticeMsg);
+    if (m.inviteMsg) await deleteSent(sock, m.inviteMsg.key.remoteJid, m.inviteMsg);
+  });
+  addLog(`🚪 ${customerName(c)}: המנהל הוצא מהקבוצה על ידי הבוט (לא נחשב הפרה)`);
+}
+
+/** Makes the manager an admin of the group (or takes it back). */
+export async function setManagerAdmin(c, on) {
+  if (c.manager?.state !== "in") throw new Error("המנהל לא בקבוצה");
+  await customerSession(c.id).use(async (sock) => {
+    const p = await findManagerIn(sock, c.groupJid);
+    if (!p) throw new Error("המנהל לא נמצא בקבוצה. סנכרן ונסה שוב");
+    await sock.groupParticipantsUpdate(c.groupJid, [p.id], on ? "promote" : "demote");
+    c.manager.admin = on;
+    save();
+  });
+  addLog(`⭐ ${customerName(c)}: המנהל ${on ? "הוא עכשיו אדמין בקבוצה" : "כבר לא אדמין בקבוצה"}`);
+}
+
+// ------------------------------------------------------ contacting the manager
+// A customer writes one message to the manager: in the "blocked" group, or in a "פנייה
+// למנהל" group opened after writing "פנייה". The manager reads it in the panel and rejects
+// it, or opens a "שיחה עם המנהל" group with the customer.
+// c.contact.stage: "write" (may write) → "pending" (message waits for the manager) → "chat".
+export const contactOpen = (c) => c.contact?.stage === "write" || c.contact?.stage === "pending";
+
+const SKIP_IN_CONTACT = new Set([
+  "protocolMessage",
+  "reactionMessage",
+  "senderKeyDistributionMessage",
+  "messageContextInfo",
+  "pollUpdateMessage",
+  "pinInChatMessage",
+]);
+
+/** Messages of the contact groups, and the customer cancelling the manager's invite. True = handled. */
+function onContactMessage(c, m) {
+  const content = m.message && normalizeMessageContent(m.message);
+  const type = content && getContentType(content);
+  if (type === "protocolMessage" && m.key.fromMe && content.protocolMessage?.type === proto.Message.ProtocolMessage.Type.REVOKE) {
+    // Deleting the invite sent to the manager cancels it (against the rules).
+    const id = content.protocolMessage.key?.id;
+    if (id && id === c.manager?.inviteMsg?.key?.id && !botDeleted().includes(id)) {
+      c.manager.canceledByCustomer = true;
+      addLog(`⚠ ${customerName(c)}: ביטל את ההזמנה של המנהל (ייחסם בסנכרון)`);
+      return true;
+    }
+  }
+  const ct = c.contact;
+  const jid = m.key.remoteJid;
+  if (!ct || (jid !== ct.groupJid && jid !== ct.chatJid)) return false;
+  if (!m.message) return true;
+  const ts = Number(m.messageTimestamp) || Math.floor(Date.now() / 1000);
+  if (!ct.last || ts >= ct.last.timestamp) ct.last = { key: m.key, timestamp: ts }; // to delete the chat later
+  if (jid !== ct.groupJid || !m.key.fromMe || !contactOpen(c)) return true;
+  if (!type || SKIP_IN_CONTACT.has(type) || botTextIds.has(m.key.id) || ct.botIds?.includes(m.key.id)) return true;
+  ct.inbox ??= [];
+  if (ct.inbox.some((x) => x.id === m.key.id) || ct.message?.id === m.key.id) return true;
+  const inner = content[type];
+  const text = typeof inner === "string" ? inner : inner?.text || inner?.caption || "";
+  ct.inbox.push({
+    id: m.key.id,
+    key: m.key,
+    timestamp: ts,
+    text: text.slice(0, 4000),
+    media: typeof inner === "string" || inner?.text ? null : type.replace(/Message$/, ""),
+  });
+  return true;
+}
+
+/** A bot message in a contact group (blocked / request / chat). */
+async function sendContactText(c, sock, text, quoted = null, jid = c.contact.groupJid) {
+  const ct = c.contact;
+  const messageId = generateMessageIDV2(sock.user?.id);
+  botTextIds.add(messageId);
+  ct.botIds = [...(ct.botIds || []), messageId].slice(-30);
+  save();
+  const q = quoted?.key ? { quoted: { key: quoted.key, message: { conversation: quoted.text || "" } } } : {};
+  const msg = await tryDo("contact text", () => sock.sendMessage(jid, { text }, { messageId, ...q }));
+  if (msg) ct.last = keyOf(msg);
+  return msg;
+}
+
+/** On sync: takes the customer's first message to the manager; deletes any others. */
+async function checkContact(c, sock) {
+  const ct = c.contact;
+  const name = customerName(c);
+  const msgs = (ct.inbox || []).sort((a, b) => a.timestamp - b.timestamp);
+  ct.inbox = [];
+  save();
+  if (!msgs.length) return;
+  let extra = msgs;
+  if (ct.stage === "write") {
+    const [first] = msgs;
+    extra = msgs.slice(1);
+    ct.message = { ...first, at: first.timestamp * 1000 };
+    Object.assign(ct, { stage: "pending", receivedAt: Date.now() });
+    save();
+    addLog(`📩 ${name}: פנייה חדשה למנהל${ct.origin === "blocked" ? " (לקוח חסום)" : ""}`);
+    if (!extra.length) await sendContactText(c, sock, CONTACT_RECEIVED, first);
+  }
+  if (extra.length) {
+    for (const m of extra) await deleteSent(sock, ct.groupJid, m);
+    if (!ct.extraNoted) await sendContactText(c, sock, CONTACT_ONLY_FIRST, ct.message);
+    ct.extraNoted = true;
+    addLog(`  ${name}: נמחקו ${extra.length} הודעות נוספות (רק הראשונה נשלחת למנהל)`);
+  }
+  save();
+}
+
+/** The customer wrote "פנייה": a group where they write one message to the manager. */
+async function openRequestGroup(c, sock) {
+  if (c.oldRequestGroup) {
+    // The previous (rejected, read-only) request group.
+    await leaveAndDeleteChat(sock, c.oldRequestGroup.jid, c.oldRequestGroup.last?.key, c.oldRequestGroup.last?.timestamp);
+    c.oldRequestGroup = null;
+  }
+  const jid = await createLockedGroup(sock, REQUEST_GROUP_NAME);
+  await tryDo("request picture", () => setGroupPicture(sock, jid, GROUP_LOGO));
+  c.contact = { stage: "write", origin: "request", groupJid: jid, createdAt: Date.now(), botIds: [] };
+  save();
+  await sendContactText(c, sock, REQUEST_GROUP_MESSAGE);
+  addLog(`✉️ ${customerName(c)}: כתב "פנייה". נפתחה לו קבוצת "${REQUEST_GROUP_NAME}" לכתוב הודעה אחת למנהל`);
+}
+
+/** Ends the contact and keeps it in the history (shown in the panel). */
+function closeContact(c, outcome) {
+  const ct = c.contact;
+  if (ct?.message) {
+    const rec = {
+      id: newId(),
+      customerId: c.id,
+      name: customerName(c),
+      origin: ct.origin,
+      text: ct.message.text,
+      media: ct.message.media,
+      at: ct.message.at,
+      chatAt: ct.openedAt || null,
+      closedAt: Date.now(),
+      outcome,
+    };
+    db().contactHistory = [...(db().contactHistory || []), rec].slice(-100);
+  }
+  c.contact = null;
+  save();
+}
+
+/** Removes the contact groups (request / chat) from the customer's WhatsApp. */
+async function dropContactGroups(c, sock, outcome) {
+  const ct = c.contact;
+  if (!ct) return;
+  if (ct.chatJid) {
+    const p = await findManagerIn(sock, ct.chatJid);
+    if (p) await tryDo("remove manager", () => sock.groupParticipantsUpdate(ct.chatJid, [p.id], "remove"));
+    await leaveAndDeleteChat(sock, ct.chatJid, ct.last?.key, ct.last?.timestamp);
+  } else if (ct.groupJid && ct.groupJid !== c.blockGroupJid) {
+    await leaveAndDeleteChat(sock, ct.groupJid, ct.last?.key, ct.last?.timestamp);
+  }
+  closeContact(c, outcome);
+}
+
+/** The manager rejects the message: a last message in that group, and the bot leaves it (read-only). */
+export async function rejectContact(c) {
+  if (!contactOpen(c)) throw new Error("אין פנייה פתוחה");
+  const ct = c.contact;
+  await customerSession(c.id).use(async (sock) => {
+    await sendContactText(c, sock, contactRejected(ct.origin));
+    await sleep(1500);
+    await tryDo("leave", () => sock.groupLeave(ct.groupJid));
+    if (ct.origin === "blocked") c.contactClosed = true;
+    else c.oldRequestGroup = { jid: ct.groupJid, last: ct.last };
+    closeContact(c, "rejected");
+  });
+  addLog(`✖ ${customerName(c)}: הפנייה נדחתה${ct.origin === "blocked" ? ". הוא לא יוכל לפנות שוב" : ""}`);
+}
+
+/** The manager closes a blocked customer's option to write (the "blocked" group becomes read-only). */
+export async function disableContact(c) {
+  if (c.status !== "blocked" || !contactOpen(c)) throw new Error("אין אפשרות פנייה פתוחה");
+  const ct = c.contact;
+  const s = customerSession(c.id);
+  if (s.isLinked()) {
+    await s.use(async (sock) => {
+      await sendContactText(c, sock, CONTACT_DISABLED);
+      await sleep(1500);
+      await tryDo("leave", () => sock.groupLeave(ct.groupJid));
+    });
+  }
+  c.contactClosed = true;
+  closeContact(c, "disabled");
+  addLog(`🔒 ${customerName(c)}: האפשרות לפנות למנהל נסגרה`);
+}
+
+/** The manager accepts: the write group is deleted and a "שיחה עם המנהל" group opens, with the manager as admin. */
+export async function openChat(c) {
+  const name = customerName(c);
+  const ct = c.contact;
+  if (ct?.stage !== "pending") throw new Error("אין פנייה שממתינה");
+  mustManager(c);
+  let r = null;
+  await customerSession(c.id).use(async (sock) => {
+    const jid = await createLockedGroup(sock, CHAT_GROUP_NAME);
+    await tryDo("chat picture", () => setGroupPicture(sock, jid, GROUP_LOGO));
+    r = await tryDo("add manager", () => addOrInviteManager(sock, jid, CHAT_GROUP_NAME, `הזמנה ל"${CHAT_GROUP_NAME}" עם ${name}`));
+    const admin = !!(r?.added && (await tryDo("promote", () => sock.groupParticipantsUpdate(jid, [managerJidOf()], "promote"))));
+    await leaveAndDeleteChat(sock, ct.groupJid, ct.last?.key, ct.last?.timestamp);
+    if (ct.origin === "blocked") Object.assign(c, { blockGroupJid: null, blockMsg: null });
+    Object.assign(ct, { stage: "chat", chatJid: jid, groupJid: null, openedAt: Date.now(), last: null, managerAdmin: admin });
+    ct.managerInvite = r && !r.added ? { kind: r.kind, expiresAt: r.expiresAt } : null;
+    save();
+    await sendContactText(c, sock, CHAT_OPENED, null, jid);
+    // The customer's message, from their own account.
+    const m = ct.message;
+    await sendContactText(c, sock, m.text || (m.media ? "(ההודעה הייתה קובץ)" : "…"), null, jid);
+  });
+  addLog(`💬 ${name}: נפתחה "${CHAT_GROUP_NAME}"${r?.added ? "" : r ? ". נשלחה לך הזמנה בצ'אט פרטי" : ". ⚠ לא הצלחתי לצרף אותך"}`);
+}
+
+/** The manager joined the chat group through an invite: make them admin. */
+async function promoteManagerInChat(c, sock) {
+  const ct = c.contact;
+  if (ct.managerAdmin) return;
+  const p = await findManagerIn(sock, ct.chatJid);
+  if (!p) return;
+  if (!p.admin) await tryDo("promote", () => sock.groupParticipantsUpdate(ct.chatJid, [p.id], "promote"));
+  ct.managerAdmin = true;
+  ct.managerInvite = null;
+  save();
+}
+
+/**
+ * The manager ends the chat. Blocked customer: "unblock" or "keep" (blocked for good).
+ * Other customer: "close", or "block" (blocked for good).
+ */
+export async function closeChat(c, outcome) {
+  if (c.contact?.stage !== "chat") throw new Error("אין שיחה פתוחה");
+  const blocked = c.status === "blocked";
+  if (!(blocked ? ["unblock", "keep"] : ["close", "block"]).includes(outcome)) throw new Error("פעולה לא מתאימה");
+  if (outcome === "unblock") return unblockCustomer(c);
+  const s = customerSession(c.id);
+  await s.use(async (sock) => {
+    await s.waitOfflineMessages(); // the chat's last message, to delete the chat
+    if (outcome === "close") return dropContactGroups(c, sock, "closed");
+    const meta = c.groupJid ? await groupMeta(sock, c.groupJid) : null;
+    if (!meta) c.groupJid = null;
+    const reason = outcome === "keep" ? c.blockedReason || "חסום" : "נחסם על ידי המנהל אחרי שיחה";
+    await block(c, sock, meta, [reason], "final");
+  });
+  if (outcome === "close") addLog(`✔ ${customerName(c)}: השיחה עם המנהל נסגרה`);
+}
+
+export const queueContact = (c, what, fn) => enqueue(`contact:${c.id}`, `${what} – ${customerName(c)}`, fn);
 
 /** Every active customer's invite link is renewed by the bot on their next sync. */
 export function renewLinksOnNextSync() {
