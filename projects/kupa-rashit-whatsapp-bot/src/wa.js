@@ -28,12 +28,13 @@ function waVersion() {
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class WaSession {
-  constructor(id, { keepAlive = false, onOpen, onMessages } = {}) {
+  constructor(id, { keepAlive = false, onOpen, onMessages, onDeletes } = {}) {
     this.id = id;
     this.dir = path.join(SESSIONS_DIR, id);
     this.keepAlive = keepAlive;
     this.onOpen = onOpen;
     this.onMessages = onMessages;
+    this.onDeletes = onDeletes;
     this.sock = null;
     this.state = "closed"; // closed | connecting | qr | open | loggedOut
     this.qrDataUrl = null;
@@ -82,6 +83,7 @@ export class WaSession {
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("connection.update", (u) => this.#onUpdate(sock, u).catch((e) => console.error(`[${this.id}]`, e)));
     if (this.onMessages) sock.ev.on("messages.upsert", (m) => this.onMessages(this, m));
+    if (this.onDeletes) sock.ev.on("messages.delete", (d) => this.onDeletes(this, d));
     this.touch();
   }
 

@@ -7,7 +7,9 @@ import { ALLOW_LAN, APP_DIR, DATA_DIR, PORT } from "./config.js";
 import {
   customerName,
   customerSession,
+  deleteNotice,
   deliveredCount,
+  groupLink,
   queueBlock,
   queueLogout,
   queueNotice,
@@ -84,6 +86,7 @@ function customerView(c) {
     requests: (c.inbox || []).length,
     resetPending: !!c.resetPending,
     canMessage: c.status !== "blocked" && !!c.groupJid && customerSession(c.id).isLinked(),
+    inviteLink: c.inviteLink || null,
     wa: { state: s.state, linked: s.linked, error: s.error },
   };
 }
@@ -139,6 +142,33 @@ route("GET", /^\/api\/state$/, () => ({
   notices: (db().notices || []).slice(-20).reverse(),
 }));
 
+// Delete a sent message from the groups it reached.
+route("DELETE", /^\/api\/notices\/([\w-]+)$/, (_req, [id]) => {
+  const notice = (db().notices || []).find((n) => n.id === id);
+  if (!notice) throw new Error("ההודעה לא נמצאה");
+  let count = 0;
+  for (const rec of notice.recipients) {
+    const c = getCustomer(rec.id);
+    if (!c || rec.status !== "sent") continue;
+    count++;
+    enqueue(`unnotice:${id}:${c.id}`, `מחיקת הודעה אצל ${customerName(c)}`, async () => {
+      const done = await deleteNotice(c, rec);
+      rec.status = "deleted";
+      if (!done) rec.error = "הקבוצה כבר הוחלפה";
+      save();
+    });
+  }
+  notice.deletedAt = Date.now();
+  save();
+  return { count };
+});
+
+// Invite link to a customer's episodes group.
+route("POST", /^\/api\/customers\/([\w-]+)\/link$/, (_req, [id]) => {
+  const c = mustCustomer(id);
+  return { queued: enqueue(`link:${id}`, `קישור לקבוצה של ${customerName(c)}`, () => groupLink(c)) };
+});
+
 // Messages from the manager to customers' groups, with a small history.
 route("POST", /^\/api\/notices$/, async (req) => {
   const b = await readJson(req);
@@ -157,9 +187,10 @@ route("POST", /^\/api\/notices$/, async (req) => {
   save();
   for (const c of list) {
     const rec = notice.recipients.find((x) => x.id === c.id);
-    queueNotice(c, text, (ok, error) => {
+    queueNotice(c, text, (ok, error, info) => {
       rec.status = ok ? "sent" : "failed";
       if (error) rec.error = error;
+      if (info) Object.assign(rec, info); // message key: to delete it later
       save();
     });
   }
@@ -177,6 +208,12 @@ route("PUT", /^\/api\/settings$/, async (req) => {
   }
   if (b.reuseUploads != null) st.reuseUploads = !!b.reuseUploads;
   if (b.sendAs === "document" || b.sendAs === "video") st.sendAs = b.sendAs;
+  if (Array.isArray(b.blockWords)) {
+    const seen = new Set();
+    st.blockWords = b.blockWords
+      .map((w) => ({ word: String(w.word || "").trim().slice(0, 40), message: String(w.message || "").trim().slice(0, 1000) }))
+      .filter((w) => w.word && !seen.has(w.word) && seen.add(w.word));
+  }
   if (b.resetMaxVideo) st.maxVideoBytes = null;
   save();
   return st;
@@ -361,10 +398,10 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0; // uploads of big videos can take a while
 
 // One time per such version: every customer gets a new group (this time: with the new logo).
-for (const flag of ["resetForFilesDone", "resetForLogoDone", "resetForThumbDone"]) {
-  if (settings()[flag]) continue;
+const RESET_FLAGS = ["resetForFilesDone", "resetForLogoDone", "resetForThumbDone", "resetForNoDeleteRuleDone"];
+if (RESET_FLAGS.some((f) => !settings()[f])) {
   resetAllOnNextSync();
-  settings().resetForFilesDone = settings().resetForLogoDone = settings().resetForThumbDone = true;
+  for (const f of RESET_FLAGS) settings()[f] = true;
   save();
 }
 

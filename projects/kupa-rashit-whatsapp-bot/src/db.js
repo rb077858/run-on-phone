@@ -22,6 +22,12 @@ export const DEFAULT_SETTINGS = {
   reuseUploads: true, // upload each video to WhatsApp once and reuse it for all customers
   maxVideoBytes: null, // learned: the part size WhatsApp accepted
   sendAs: "document", // "document": every episode as one MP4 file; "video": videos (parts if too big)
+  // A customer who writes one of these words (alone) in their group is blocked on the next
+  // sync. `message`: optional text the bot sends them first (shown in the "blocked" group).
+  blockWords: [
+    { word: "חסימה", message: "" },
+    { word: "חסום", message: "" },
+  ],
 };
 
 let data = empty();
