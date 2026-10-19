@@ -58,17 +58,24 @@ export const WELCOME_MESSAGE = [
   `נוצר על ידי ${BRAND} 🤖✨`,
 ].join("\n");
 
-export const BLOCKED_MESSAGE = [
-  `⛔ *נחסמת על ידי ${BRAND}*`,
-  "",
-  `זוהתה הפרה של כללי הקבוצה "${EPISODES_GROUP_NAME}":`,
-  "צירוף משתתפים לקבוצה או שינוי של פרטי הקבוצה.",
-  "",
-  "לכן הקבוצה נמחקה והגישה לפרקים נחסמה.",
-  "לביטול החסימה יש לפנות למנהל.",
-  "",
-  "(הודעה אוטומטית. אי אפשר להשיב בקבוצה הזאת.)",
-].join("\n");
+/** The one message in the "blocked" group. kind: "violation" | "manual" | "self". */
+export function blockedMessage(kind) {
+  const why = {
+    violation: [`זוהתה הפרה של כללי הקבוצה "${EPISODES_GROUP_NAME}":`, "צירוף משתתפים לקבוצה או שינוי של פרטי הקבוצה."],
+    manual: ["הגישה שלך לפרקים נחסמה על ידי המנהל."],
+    self: ['החסימה בוצעה לבקשתך (שלחת "חסימה" בקבוצה).'],
+  }[kind];
+  return [
+    `⛔ *נחסמת על ידי ${BRAND}*`,
+    "",
+    ...why,
+    "",
+    "הקבוצה נמחקה והגישה לפרקים נחסמה.",
+    "לביטול החסימה יש לפנות למנהל.",
+    "",
+    "(הודעה אוטומטית. אי אפשר להשיב בקבוצה הזאת.)",
+  ].join("\n");
+}
 
 /** A message from the manager, sent to customers' groups from the admin panel. */
 export const noticeText = (text) => `📢 *הודעה חדשה מ${BRAND}:*\n\n${text.trim()}`;

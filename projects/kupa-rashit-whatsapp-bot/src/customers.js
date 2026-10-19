@@ -3,12 +3,12 @@
 import { generateMessageIDV2, getContentType, jidNormalizedUser, normalizeMessageContent, proto } from "baileys";
 import {
   BLOCKED_GROUP_NAME,
-  BLOCKED_MESSAGE,
   EPISODES_GROUP_DESC,
   BLOCKED_LOGO,
   EPISODES_GROUP_NAME,
   GROUP_LOGO,
   WELCOME_MESSAGE,
+  blockedMessage,
   noticeText,
 } from "./config.js";
 import { db, findEpisode, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
@@ -263,8 +263,17 @@ function requestedEpisode(c, req) {
   return m ? findEpisode(Number(m[1]), Number(m[2])) || null : null;
 }
 
+// A customer who writes just "חסום" / "חסימה" in their group is blocked on the next sync.
+const SELF_BLOCK = /^\s*(חסום|חסימה)\s*[.!]*\s*$/;
+
+/** Handles the customer's messages. Returns true if the customer asked to be blocked. */
 async function handleInbox(c, sock) {
   const name = customerName(c);
+  if ((c.inbox || []).some((req) => SELF_BLOCK.test(req.text || ""))) {
+    c.inbox = [];
+    save();
+    return true;
+  }
   for (const req of c.inbox || []) {
     if (req.key) await deleteSent(sock, c.groupJid, req); // keep the group videos-only
     const ep = requestedEpisode(c, req);
@@ -352,7 +361,7 @@ export async function syncCustomer(c) {
     if (c.welcome && Date.now() - (c.welcome.pinnedAt || 0) > 25 * 86400_000) await pinWelcome(c, sock);
 
     await s.waitOfflineMessages();
-    await handleInbox(c, sock);
+    if (await handleInbox(c, sock)) return block(c, sock, meta, ['הלקוח ביקש חסימה בקבוצה'], "self");
 
     // Messages of deleted/changed episodes, duplicates and leftovers of a different split.
     const episodes = new Map(db().episodes.map((e) => [e.id, e]));
@@ -423,10 +432,11 @@ export async function syncCustomer(c) {
 // ------------------------------------------------------------ block/unblock
 const selfIds = (sock) => new Set([sock.user?.id, sock.user?.lid].filter(Boolean).map((j) => jidNormalizedUser(j)));
 
-async function block(c, sock, meta, reasons) {
+async function block(c, sock, meta, reasons, kind = "violation") {
   const name = customerName(c);
-  addLog(`⛔ ${name}: הפרת כללים – ${reasons.join(", ")}. חוסם.`);
+  addLog(`⛔ ${name}: ${kind === "violation" ? "הפרת כללים – " : ""}${reasons.join(", ")}. חוסם.`);
   const jid = c.groupJid;
+  meta ??= { participants: [] };
 
   const me = selfIds(sock);
   // Only when someone was added: with one participant, that one is the customer.
@@ -445,17 +455,19 @@ async function block(c, sock, meta, reasons) {
     if (c.welcome) await deleteSent(sock, jid, c.welcome);
     await tryDo("remove participants", () => sock.groupParticipantsUpdate(jid, others, "remove"));
   }
-  await tryDo("revoke invite", () => sock.groupRevokeInvite(jid));
-  // With everyone out, leaving empties the group; then the chat is deleted from the customer's WhatsApp.
-  const last = sent.at(-1) || c.welcome;
-  const deleted = await leaveAndDeleteChat(sock, jid, last?.key, last?.timestamp);
-  if (!deleted) addLog("  ⚠ וואטסאפ לא אישרה את מחיקת הצ'אט. הקבוצה רוקנה והועברה לארכיון אצל הלקוח");
+  if (jid) {
+    await tryDo("revoke invite", () => sock.groupRevokeInvite(jid));
+    // With everyone out, leaving empties the group; then the chat is deleted from the customer's WhatsApp.
+    const last = sent.at(-1) || c.welcome;
+    const deleted = await leaveAndDeleteChat(sock, jid, last?.key, last?.timestamp);
+    if (!deleted) addLog("  ⚠ וואטסאפ לא אישרה את מחיקת הצ'אט. הקבוצה רוקנה והועברה לארכיון אצל הלקוח");
+  }
 
   // A new group with one explanation message, which the customer then leaves: the chat stays
   // on their phone so they can read it, but they can't write in it.
   const blockJid = await createLockedGroup(sock, BLOCKED_GROUP_NAME);
   await tryDo("blocked picture", () => setGroupPicture(sock, blockJid, BLOCKED_LOGO));
-  const msg = await sock.sendMessage(blockJid, { text: BLOCKED_MESSAGE });
+  const msg = await sock.sendMessage(blockJid, { text: blockedMessage(kind) });
   await sleep(1500);
   await tryDo("leave block group", () => sock.groupLeave(blockJid));
   Object.assign(c, {
@@ -475,6 +487,12 @@ async function block(c, sock, meta, reasons) {
 
 export async function unblockCustomer(c) {
   const name = customerName(c);
+  if (!customerSession(c.id).isLinked()) {
+    // Blocked while not connected (only marked): nothing to undo in WhatsApp.
+    Object.assign(c, { status: c.groupJid ? "active" : "new", blockedReason: null, blockedAt: null });
+    save();
+    return addLog(`✔ ${name}: החסימה בוטלה`);
+  }
   await customerSession(c.id).use(async (sock) => {
     // Already left when blocked; this deletes the chat (and leaves, for blocks from older versions).
     if (c.blockGroupJid) await leaveAndDeleteChat(sock, c.blockGroupJid, c.blockMsg?.key, c.blockMsg?.timestamp);
@@ -541,6 +559,27 @@ export function queueNotice(c, text, onDone) {
       throw e;
     }
   });
+}
+
+/** Blocks a customer by the manager's decision (admin panel). */
+export async function blockManually(c) {
+  const s = customerSession(c.id);
+  if (!s.isLinked()) {
+    // No WhatsApp access: just stop sending to them.
+    Object.assign(c, { status: "blocked", blockedReason: "נחסם ידנית על ידי המנהל", blockedAt: Date.now(), resetPending: false });
+    save();
+    addLog(`⛔ ${customerName(c)}: נחסם ידנית (הוואטסאפ שלו לא מחובר, אז הקבוצה שלו לא נמחקה)`);
+    return;
+  }
+  await s.use(async (sock) => {
+    const meta = c.groupJid ? await groupMeta(sock, c.groupJid) : null;
+    if (!meta) c.groupJid = null;
+    await block(c, sock, meta, ["נחסם ידנית על ידי המנהל"], "manual");
+  });
+}
+
+export function queueBlock(c) {
+  return enqueue(`block:${c.id}`, `חסימה של ${customerName(c)}`, () => blockManually(c));
 }
 
 /** Every active customer gets a new group on their next sync. */

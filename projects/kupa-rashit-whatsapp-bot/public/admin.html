@@ -508,6 +508,7 @@ function custMenu(id) {
     ${c.canMessage ? `<button class="menu-item" data-act="msgOne" data-id="${id}">💬 שליחת הודעה</button>` : ''}
     <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
     ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
+    ${c.status !== 'blocked' ? `<button class="menu-item red" data-act="blockCust" data-id="${id}">⛔ חסימה</button>` : `<button class="menu-item" data-act="unblock" data-id="${id}">✅ ביטול חסימה</button>`}
     <button class="menu-item red" data-act="delCust" data-id="${id}">🗑 מחיקת לקוח</button>`);
 }
 
@@ -624,6 +625,12 @@ const actions = {
   delEp: (b) => { const e = epById(b.dataset.id); if (confirm(`למחוק את עונה ${e.season} פרק ${e.episode}? בסנכרון הבא הוא יימחק גם אצל הלקוחות.`)) { closeSheet(); run(api('DELETE', `/api/episodes/${e.id}`), 'נמחק'); } },
   addCust: () => customerForm(null),
   msgOne: (b) => noticeSheet(b.dataset.id),
+  blockCust: (b) => {
+    const c = custById(b.dataset.id);
+    if (!confirm(`לחסום את ${c.name}?\nהקבוצה שלו תימחק, ותיווצר לו קבוצת "נחסמת" עם הודעה. רק אתה תוכל לבטל.`)) return;
+    closeSheet();
+    run(api('POST', `/api/customers/${c.id}/block`), '⛔ החסימה התחילה');
+  },
   sendOne: (b) => {
     const text = $('oneText').value;
     run(api('POST', '/api/notices', { text, customerIds: [b.dataset.id] }), '📢 ההודעה בדרך').then((r) => r && closeSheet());

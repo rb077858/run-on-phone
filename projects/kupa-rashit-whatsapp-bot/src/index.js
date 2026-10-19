@@ -8,6 +8,7 @@ import {
   customerName,
   customerSession,
   deliveredCount,
+  queueBlock,
   queueLogout,
   queueNotice,
   queueReset,
@@ -255,6 +256,11 @@ route("POST", /^\/api\/customers\/([\w-]+)\/unblock$/, (_req, [id]) => {
   if (c.status !== "blocked") throw new Error("הלקוח לא חסום");
   return { queued: queueUnblock(c) };
 });
+route("POST", /^\/api\/customers\/([\w-]+)\/block$/, (_req, [id]) => {
+  const c = mustCustomer(id);
+  if (c.status === "blocked") throw new Error("הלקוח כבר חסום");
+  return { queued: queueBlock(c) };
+});
 route("POST", /^\/api\/customers\/([\w-]+)\/reset$/, (_req, [id]) => {
   const c = mustCustomer(id);
   if (c.status === "blocked") throw new Error("הלקוח חסום. בטל קודם את החסימה");
@@ -355,10 +361,10 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0; // uploads of big videos can take a while
 
 // One time per such version: every customer gets a new group (this time: with the new logo).
-for (const flag of ["resetForFilesDone", "resetForLogoDone"]) {
+for (const flag of ["resetForFilesDone", "resetForLogoDone", "resetForThumbDone"]) {
   if (settings()[flag]) continue;
   resetAllOnNextSync();
-  settings().resetForFilesDone = settings().resetForLogoDone = true;
+  settings().resetForFilesDone = settings().resetForLogoDone = settings().resetForThumbDone = true;
   save();
 }
 

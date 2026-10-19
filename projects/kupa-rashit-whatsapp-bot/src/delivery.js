@@ -79,6 +79,9 @@ async function refAlive(ref, kind) {
 async function relay(sock, jid, ref, kind, caption) {
   const m = decodeRef(ref, kind);
   m.caption = caption;
+  // The preview picture travels in the message, not in the uploaded file: always use the
+  // current one (so an older upload shows the new logo too).
+  m.jpegThumbnail = THUMBNAIL;
   const msg = generateWAMessageFromContent(jid, { [`${kind}Message`]: m }, { userJid: sock.user.id });
   await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
   return msg;
