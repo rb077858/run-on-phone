@@ -1,0 +1,1 @@
+מקורות הלוגו ותמונת קבוצת החסימה (HTML + SVG). כדי לעבד מחדש: לשים ליד הקבצים את הגופן Rubik.ttf (Google Fonts), לפתוח בדפדפן בגודל 1280×1280, לצלם, ולהקטין ל-640×640 JPEG (`group-logo.jpg`, `blocked-logo.jpg`), 192 (`logo-192.jpg`) ו-320 (`thumb.jpg`).

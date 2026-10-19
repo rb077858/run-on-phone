@@ -17,14 +17,19 @@ export const ALLOW_LAN = process.env.ALLOW_LAN === "1";
 
 for (const dir of [DATA_DIR, SESSIONS_DIR, CACHE_DIR, MEDIA_DIR]) fs.mkdirSync(dir, { recursive: true });
 
-export const THUMBNAIL = fs.readFileSync(path.join(APP_DIR, "assets", "thumb.jpg"));
+const asset = (name) => fs.readFileSync(path.join(APP_DIR, "assets", name));
+export const THUMBNAIL = asset("thumb.jpg");
+// Group pictures, already 640×640 JPEG as WhatsApp wants them (no image library on the phone).
+export const GROUP_LOGO = asset("group-logo.jpg");
+export const BLOCKED_LOGO = asset("blocked-logo.jpg");
 
+export const BRAND = "ראם בוטים ואוטומציות";
 export const EPISODES_GROUP_NAME = "קופה ראשית פרקים";
-export const BLOCKED_GROUP_NAME = "נחסמת על ידי ראם בוטים";
+export const BLOCKED_GROUP_NAME = `נחסמת על ידי ${BRAND}`;
 
 export const EPISODES_GROUP_DESC = [
   "🎬 קופה ראשית – כל הפרקים.",
-  "נוצר על ידי ראם בוטים 🤖✨",
+  `נוצר על ידי ${BRAND} 🤖✨`,
   "",
   "🔎 לחיפוש פרק: חפשו בקבוצה למשל ע6פ4 (עונה 6 פרק 4).",
   "📥 פרק לא נפתח? עשו \"השב\" על הקובץ וכתבו משהו, או כתבו \"עונה 6 פרק 4\". הוא יישלח שוב בעדכון הבא.",
@@ -50,11 +55,11 @@ export const WELCOME_MESSAGE = [
   "",
   "⛔ אסור לצרף אנשים לקבוצה או לשנות את פרטי הקבוצה. זה גורם לחסימה.",
   "",
-  "נוצר על ידי ראם בוטים 🤖✨",
+  `נוצר על ידי ${BRAND} 🤖✨`,
 ].join("\n");
 
 export const BLOCKED_MESSAGE = [
-  "⛔ *נחסמת על ידי ראם בוטים*",
+  `⛔ *נחסמת על ידי ${BRAND}*`,
   "",
   `זוהתה הפרה של כללי הקבוצה "${EPISODES_GROUP_NAME}":`,
   "צירוף משתתפים לקבוצה או שינוי של פרטי הקבוצה.",
@@ -64,6 +69,9 @@ export const BLOCKED_MESSAGE = [
   "",
   "(הודעה אוטומטית. אי אפשר להשיב בקבוצה הזאת.)",
 ].join("\n");
+
+/** A message from the manager, sent to customers' groups from the admin panel. */
+export const noticeText = (text) => `📢 *הודעה חדשה מ${BRAND}:*\n\n${text.trim()}`;
 
 const pad = (n) => String(n).padStart(2, "0");
 

@@ -5,8 +5,11 @@ import {
   BLOCKED_GROUP_NAME,
   BLOCKED_MESSAGE,
   EPISODES_GROUP_DESC,
+  BLOCKED_LOGO,
   EPISODES_GROUP_NAME,
+  GROUP_LOGO,
   WELCOME_MESSAGE,
+  noticeText,
 } from "./config.js";
 import { db, findEpisode, getCustomer, normalizePhone, save, sortedEpisodes, sourceKey } from "./db.js";
 import { firstUpload, forgetRefChecks, mediaPlan, sendParts } from "./delivery.js";
@@ -46,6 +49,53 @@ const tryDo = async (what, fn) => {
   }
 };
 
+// ---------------------------------------------------------------- pictures
+// Baileys' updateProfilePicture needs an image library the phone doesn't have; our images
+// are already 640×640 JPEG, so they are sent as they are.
+async function setGroupPicture(sock, jid, jpeg) {
+  await sock.query({
+    tag: "iq",
+    attrs: { to: "s.whatsapp.net", type: "set", xmlns: "w:profile:picture", target: jid },
+    content: [{ tag: "picture", attrs: { type: "image" }, content: jpeg }],
+  });
+}
+
+/**
+ * The id of the group's current picture: { id } (null = no picture), or null when it
+ * couldn't be checked (network…) – then nobody is blocked over it.
+ */
+async function groupPictureId(sock, jid) {
+  try {
+    const res = await sock.query({
+      tag: "iq",
+      attrs: { target: jid, to: "s.whatsapp.net", type: "get", xmlns: "w:profile:picture" },
+      content: [{ tag: "picture", attrs: { type: "preview", query: "url" } }],
+    });
+    const pic = res.content?.find?.((n) => n.tag === "picture");
+    return { id: pic?.attrs?.id || null };
+  } catch (e) {
+    const code = Number(e?.output?.statusCode ?? e?.data);
+    if (code === 404 || /item-not-found/.test(e.message)) return { id: null };
+    return null;
+  }
+}
+
+/** Puts the logo on the episodes group and remembers its id (to notice if it is changed). */
+async function applyGroupLogo(c, sock) {
+  try {
+    await setGroupPicture(sock, c.groupJid, GROUP_LOGO);
+  } catch (e) {
+    console.warn(`group picture failed: ${e.message}`);
+    return;
+  }
+  await sleep(1000);
+  const pic = await groupPictureId(sock, c.groupJid);
+  if (pic?.id) {
+    c.pictureId = pic.id;
+    save();
+  }
+}
+
 /** Creates a group that holds only this account, with all settings locked. */
 async function createLockedGroup(sock, subject) {
   const meta = await sock.groupCreate(subject, []);
@@ -69,7 +119,9 @@ async function createEpisodesGroup(c, sock) {
   c.sent = [];
   c.inbox = [];
   c.welcome = null;
+  c.pictureId = null;
   save();
+  await applyGroupLogo(c, sock);
   await sendWelcome(c, sock);
   return jid;
 }
@@ -108,8 +160,11 @@ async function violations(c, sock, meta) {
   if (meta.subject !== EPISODES_GROUP_NAME) reasons.push(`שם הקבוצה שונה ל-"${meta.subject}"`);
   if (norm(meta.desc) !== norm(c.groupDesc ?? EPISODES_GROUP_DESC)) reasons.push("תיאור הקבוצה שונה");
   if (meta.participants.length > 1) reasons.push(`צורפו ${meta.participants.length - 1} משתתפים לקבוצה`);
-  const picture = await sock.profilePictureUrl(meta.id, "preview").catch(() => null);
-  if (picture) reasons.push("נוספה תמונה לקבוצה");
+  const pic = await groupPictureId(sock, meta.id);
+  if (pic) {
+    if (c.pictureId && pic.id !== c.pictureId) reasons.push(pic.id ? "תמונת הקבוצה הוחלפה" : "תמונת הקבוצה נמחקה");
+    else if (!c.pictureId && pic.id) reasons.push("נוספה תמונה לקבוצה");
+  }
   return reasons;
 }
 
@@ -177,7 +232,7 @@ function onCustomerMessages(s, { messages }) {
     const type = getContentType(content);
     if (!type || IGNORED_TYPES.has(type)) continue;
     c.inbox ??= [];
-    if (botTextIds.has(m.key.id) || m.key.id === c.welcome?.key?.id) continue;
+    if (botTextIds.has(m.key.id) || m.key.id === c.welcome?.key?.id || c.noticeIds?.includes(m.key.id)) continue;
     if (c.inbox.some((x) => x.id === m.key.id) || c.sent?.some((r) => r.key.id === m.key.id)) continue;
     const inner = content[type];
     c.inbox.push({
@@ -283,6 +338,8 @@ export async function syncCustomer(c) {
     const reasons = await violations(c, sock, meta);
     if (reasons.length) return block(c, sock, meta, reasons);
     if (meta.ephemeralDuration) await tryDo("ephemeral off", () => sock.groupToggleEphemeral(c.groupJid, 0));
+    // The logo didn't get set when the group was made: try again.
+    if (!c.pictureId) await applyGroupLogo(c, sock);
     if (norm(c.groupDesc) !== norm(EPISODES_GROUP_DESC)) {
       // The bot's description text changed in a newer version: update it in the group.
       await tryDo("description", () => sock.groupUpdateDescription(c.groupJid, EPISODES_GROUP_DESC));
@@ -372,9 +429,13 @@ async function block(c, sock, meta, reasons) {
   const jid = c.groupJid;
 
   const me = selfIds(sock);
-  const others = meta.participants
-    .filter((p) => ![p.id, p.phoneNumber, p.lid].some((x) => x && me.has(jidNormalizedUser(x))))
-    .map((p) => p.id);
+  // Only when someone was added: with one participant, that one is the customer.
+  const others =
+    meta.participants.length > 1
+      ? meta.participants
+          .filter((p) => ![p.id, p.phoneNumber, p.lid].some((x) => x && me.has(jidNormalizedUser(x))))
+          .map((p) => p.id)
+      : [];
   const sent = [...(c.sent || [])];
   if (others.length) {
     // People were added: first delete the videos "for everyone" while they are still in the
@@ -393,6 +454,7 @@ async function block(c, sock, meta, reasons) {
   // A new group with one explanation message, which the customer then leaves: the chat stays
   // on their phone so they can read it, but they can't write in it.
   const blockJid = await createLockedGroup(sock, BLOCKED_GROUP_NAME);
+  await tryDo("blocked picture", () => setGroupPicture(sock, blockJid, BLOCKED_LOGO));
   const msg = await sock.sendMessage(blockJid, { text: BLOCKED_MESSAGE });
   await sleep(1500);
   await tryDo("leave block group", () => sock.groupLeave(blockJid));
@@ -450,6 +512,35 @@ export function queueSyncAll() {
 
 export function queueUnblock(c) {
   return enqueue(`unblock:${c.id}`, `ביטול חסימה ${customerName(c)}`, () => unblockCustomer(c));
+}
+
+// ---------------------------------------------------------------- notices
+/** Sends a manager message ("📢 הודעה חדשה מ…") into the customer's episodes group. */
+export async function sendNotice(c, text) {
+  const name = customerName(c);
+  if (c.status === "blocked") throw new Error("הלקוח חסום");
+  if (!c.groupJid) throw new Error("אין לו קבוצה עדיין");
+  await customerSession(c.id).use(async (sock) => {
+    const messageId = generateMessageIDV2(sock.user?.id);
+    botTextIds.add(messageId);
+    // Remembered, so the bot never takes it for a customer request (even after a restart).
+    c.noticeIds = [...(c.noticeIds || []), messageId].slice(-50);
+    save();
+    await sock.sendMessage(c.groupJid, { text: noticeText(text) }, { messageId });
+  });
+  addLog(`📢 ${name}: ההודעה נשלחה`);
+}
+
+export function queueNotice(c, text, onDone) {
+  return enqueue(`notice:${c.id}:${Date.now()}:${Math.random()}`, `הודעה ל${customerName(c)}`, async () => {
+    try {
+      await sendNotice(c, text);
+      onDone?.(true);
+    } catch (e) {
+      onDone?.(false, e.message);
+      throw e;
+    }
+  });
 }
 
 /** Every active customer gets a new group on their next sync. */

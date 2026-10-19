@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face { font-family: R; src: url(Rubik.ttf); font-weight: 300 900; }
+html,body{margin:0}
+.wrap{width:1280px;height:1280px;position:relative;font-family:R}
+svg{position:absolute;inset:0}
+.t{position:absolute;left:0;right:0;top:930px;text-align:center;direction:rtl;font-weight:900;font-size:150px;color:#fff;letter-spacing:2px;text-shadow:0 6px 30px #ff1f3d99}
+</style></head><body><div class="wrap">
+<svg viewBox="0 0 1280 1280" width="1280" height="1280">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%"><stop offset="0" stop-color="#4a0610"/><stop offset=".6" stop-color="#1c0306"/><stop offset="1" stop-color="#0a0102"/></radialGradient>
+    <radialGradient id="red" cx="40%" cy="35%" r="75%"><stop offset="0" stop-color="#ff4d5e"/><stop offset=".6" stop-color="#e3001b"/><stop offset="1" stop-color="#a80012"/></radialGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="40"/></filter>
+  </defs>
+  <rect width="1280" height="1280" fill="url(#bg)"/>
+  <circle cx="640" cy="500" r="360" fill="#ff1f3d" opacity=".45" filter="url(#soft)"/>
+  <circle cx="640" cy="500" r="330" fill="#fff"/>
+  <circle cx="640" cy="500" r="298" fill="url(#red)"/>
+  <rect x="420" y="452" width="440" height="96" rx="20" fill="#fff"/>
+</svg>
+<div class="t">נחסמת</div>
+</div></body></html>

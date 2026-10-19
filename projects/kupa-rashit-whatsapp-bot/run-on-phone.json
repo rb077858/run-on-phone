@@ -13,6 +13,7 @@
   ],
   "exclude": [
     "data",
-    "README.md"
+    "README.md",
+    "assets/design"
   ]
 }

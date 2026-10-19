@@ -9,6 +9,7 @@ import {
   customerSession,
   deliveredCount,
   queueLogout,
+  queueNotice,
   queueReset,
   queueSync,
   queueSyncAll,
@@ -81,6 +82,7 @@ function customerView(c) {
     delivered: deliveredCount(c),
     requests: (c.inbox || []).length,
     resetPending: !!c.resetPending,
+    canMessage: c.status !== "blocked" && !!c.groupJid && customerSession(c.id).isLinked(),
     wa: { state: s.state, linked: s.linked, error: s.error },
   };
 }
@@ -133,7 +135,36 @@ route("GET", /^\/api\/state$/, () => ({
   jobs: jobsStatus(),
   storage: storageInfo(),
   settings: settings(),
+  notices: (db().notices || []).slice(-20).reverse(),
 }));
+
+// Messages from the manager to customers' groups, with a small history.
+route("POST", /^\/api\/notices$/, async (req) => {
+  const b = await readJson(req);
+  const text = String(b.text || "").trim();
+  if (!text) throw new Error("כתוב הודעה");
+  if (text.length > 3000) throw new Error("ההודעה ארוכה מדי");
+  const list = (b.customerIds || []).map(getCustomer).filter(Boolean);
+  if (!list.length) throw new Error("בחר לפחות לקוח אחד");
+  const notice = {
+    id: newId(),
+    text,
+    at: Date.now(),
+    recipients: list.map((c) => ({ id: c.id, name: customerName(c), status: "pending" })),
+  };
+  db().notices = [...(db().notices || []), notice].slice(-50);
+  save();
+  for (const c of list) {
+    const rec = notice.recipients.find((x) => x.id === c.id);
+    queueNotice(c, text, (ok, error) => {
+      rec.status = ok ? "sent" : "failed";
+      if (error) rec.error = error;
+      save();
+    });
+  }
+  addLog(`📢 הודעה נשלחת ל-${list.length} לקוחות`);
+  return { count: list.length };
+});
 
 route("PUT", /^\/api\/settings$/, async (req) => {
   const b = await readJson(req);
@@ -305,6 +336,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(302, { location: "/admin" });
       return res.end();
     }
+    if (req.method === "GET" && url.pathname === "/logo.jpg") {
+      res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "max-age=86400" });
+      return res.end(fs.readFileSync(path.join(APP_DIR, "assets", "logo-192.jpg")));
+    }
     if (req.method === "GET" && url.pathname === "/admin") {
       return send(res, 200, fs.readFileSync(path.join(APP_DIR, "public", "admin.html")), "text/html; charset=utf-8");
     }
@@ -319,10 +354,11 @@ const server = http.createServer(async (req, res) => {
 });
 server.requestTimeout = 0; // uploads of big videos can take a while
 
-// One time (this version): every customer gets a new group with all episodes as MP4 files.
-if (!settings().resetForFilesDone) {
+// One time per such version: every customer gets a new group (this time: with the new logo).
+for (const flag of ["resetForFilesDone", "resetForLogoDone"]) {
+  if (settings()[flag]) continue;
   resetAllOnNextSync();
-  settings().resetForFilesDone = true;
+  settings().resetForFilesDone = settings().resetForLogoDone = true;
   save();
 }
 

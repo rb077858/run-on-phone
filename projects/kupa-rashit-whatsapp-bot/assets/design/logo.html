@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face { font-family: R; src: url(Rubik.ttf); font-weight: 300 900; }
+html,body{margin:0;background:transparent}
+.wrap{width:1280px;height:1280px;position:relative;font-family:R}
+svg{position:absolute;inset:0}
+.t1,.t2{position:absolute;left:0;right:0;text-align:center;direction:rtl}
+.t1{top:760px;font-weight:900;font-size:168px;color:#fff;letter-spacing:-2px;text-shadow:0 8px 40px #00e5ff55}
+.t2{top:950px;font-weight:700;font-size:96px;letter-spacing:1px;background:linear-gradient(90deg,#ffd166,#ff9f1c 45%,#ff5e8a);-webkit-background-clip:text;color:transparent;filter:drop-shadow(0 6px 20px #ff9f1c55)}
+</style></head><body><div class="wrap">
+<svg viewBox="0 0 1280 1280" width="1280" height="1280">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#3a1d8f"/><stop offset=".55" stop-color="#15104a"/><stop offset="1" stop-color="#070a1f"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset=".5" stop-color="#ffb627"/><stop offset="1" stop-color="#ff7a1a"/></linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfd8ff"/></linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#00f0ff"/><stop offset="1" stop-color="#3d7bff"/></linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="30"/></filter>
+  </defs>
+  <rect width="1280" height="1280" fill="url(#bg)"/>
+  <!-- circuit traces -->
+  <g stroke="#5b8cff" stroke-opacity=".22" stroke-width="6" fill="none" stroke-linecap="round">
+    <path d="M90 420 H300 L360 360 H470"/><path d="M1190 420 H980 L920 360 H810"/>
+    <path d="M60 560 H260 L300 600 H420"/><path d="M1220 560 H1020 L980 600 H860"/>
+    <path d="M140 300 H330"/><path d="M1140 300 H950"/>
+  </g>
+  <g fill="#7fb0ff" fill-opacity=".45"><circle cx="90" cy="420" r="11"/><circle cx="1190" cy="420" r="11"/><circle cx="60" cy="560" r="11"/><circle cx="1220" cy="560" r="11"/><circle cx="140" cy="300" r="11"/><circle cx="1140" cy="300" r="11"/></g>
+  <circle cx="640" cy="420" r="300" fill="#7b4dff" opacity=".35" filter="url(#soft)"/>
+  <!-- gear -->
+  <g transform="translate(640 420)">
+    <g fill="url(#gold)">
+      <circle r="250"/>
+      <g id="teeth">
+        <rect x="-38" y="-300" width="76" height="90" rx="14"/>
+      </g>
+      <use href="#teeth" transform="rotate(45)"/><use href="#teeth" transform="rotate(90)"/><use href="#teeth" transform="rotate(135)"/>
+      <use href="#teeth" transform="rotate(180)"/><use href="#teeth" transform="rotate(225)"/><use href="#teeth" transform="rotate(270)"/><use href="#teeth" transform="rotate(315)"/>
+    </g>
+    <circle r="210" fill="#120c35"/>
+    <!-- robot -->
+    <line x1="0" y1="-205" x2="0" y2="-150" stroke="url(#face)" stroke-width="16" stroke-linecap="round"/>
+    <circle cy="-212" r="24" fill="#00f0ff" filter="url(#glow)"/>
+    <rect x="-150" y="-145" width="300" height="230" rx="70" fill="url(#face)"/>
+    <rect x="-176" y="-70" width="34" height="90" rx="14" fill="#cfd8ff"/><rect x="142" y="-70" width="34" height="90" rx="14" fill="#cfd8ff"/>
+    <rect x="-118" y="-110" width="236" height="150" rx="52" fill="#0b0f2e"/>
+    <g filter="url(#glow)" fill="url(#cyan)">
+      <rect x="-82" y="-74" width="56" height="64" rx="24"/>
+      <rect x="26" y="-74" width="56" height="64" rx="24"/>
+    </g>
+    <path d="M-40 12 Q0 40 40 12" stroke="#00f0ff" stroke-width="12" fill="none" stroke-linecap="round" filter="url(#glow)"/>
+    <!-- lightning (automation) -->
+    <path d="M150 60 L95 160 H150 L120 250 L235 125 H175 L215 60 Z" fill="url(#gold)" stroke="#120c35" stroke-width="12" stroke-linejoin="round"/>
+  </g>
+</svg>
+<div class="t1">ראם בוטים</div>
+<div class="t2">ואוטומציות</div>
+</div></body></html>

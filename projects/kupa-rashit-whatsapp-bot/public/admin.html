@@ -23,7 +23,7 @@
   /* header */
   header { padding: 18px 16px 14px; background: radial-gradient(120% 140% at 100% 0%, #3b2a78 0%, #1a1430 55%, var(--bg) 100%); }
   .brand { display: flex; align-items: center; gap: 12px; }
-  .logo { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: linear-gradient(135deg, var(--gold), #ff9f43); box-shadow: 0 6px 18px #f7c54855; }
+  .logo { width: 52px; height: 52px; border-radius: 50%; box-shadow: 0 6px 22px #7b4dff66; border: 2px solid #ffffff22; }
   .brand h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
   .brand .sub { font-size: 12px; color: var(--muted); }
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
@@ -141,6 +141,15 @@
   progress { width: 100%; height: 8px; accent-color: var(--gold); }
   .pick-list { max-height: 50vh; overflow: auto; }
 
+  .ttl { margin: 0 0 10px; font-size: 16px; }
+  textarea { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; outline: none; resize: vertical; }
+  textarea:focus { border-color: var(--gold); }
+  .bubble { background: #005c4b; color: #e9fdf6; border-radius: 12px 0 12px 12px; padding: 10px 12px; margin-top: 6px; white-space: pre-wrap; font-size: 14px; min-height: 20px; }
+  .bubble b { font-weight: 700; }
+  .pick { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-top: 1px solid var(--line); }
+  .pick input { width: 20px; height: 20px; accent-color: var(--gold); }
+  .pick.off { opacity: .45; }
+  .hist .who { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   .toast { position: fixed; top: 14px; left: 50%; transform: translate(-50%, -150%); background: var(--card2); border: 1px solid var(--line); padding: 11px 16px; border-radius: 14px; box-shadow: var(--shadow); z-index: 20; transition: .25s; max-width: 90vw; font-weight: 600; }
   .toast.on { transform: translate(-50%, 0); }
   .toast.bad { border-color: var(--bad); color: #ffc2cc; }
@@ -149,8 +158,8 @@
 <body>
 <header>
   <div class="brand">
-    <div class="logo">🎬</div>
-    <div><h1>קופה ראשית</h1><div class="sub">ממשק ניהול · ראם בוטים 🤖</div></div>
+    <img class="logo" src="/logo.jpg" alt="">
+    <div><h1>קופה ראשית</h1><div class="sub">ממשק ניהול · ראם בוטים ואוטומציות</div></div>
   </div>
   <div class="stats">
     <div class="stat"><b id="stCust">0</b><span>לקוחות</span></div>
@@ -173,6 +182,20 @@
   <section class="page" id="p-episodes">
     <div class="toolbar"><input class="search" id="epSearch" placeholder="🔍 עונה, פרק או שם"><button class="btn gold" data-act="addEp">➕ פרק</button></div>
     <div id="episodes"></div>
+  </section>
+
+  <section class="page" id="p-msgs">
+    <div class="card">
+      <h3 class="ttl">📢 הודעה ללקוחות</h3>
+      <div class="field"><textarea id="noticeText" rows="4" placeholder="כתוב כאן את ההודעה…"></textarea></div>
+      <div class="muted small">כך היא תופיע בקבוצה של הלקוח:</div>
+      <div class="bubble" id="noticePreview"></div>
+      <div class="row" style="margin:12px 0 6px"><b class="grow">למי לשלוח?</b><button class="btn sm ghost" data-act="pickAll">בחירת כולם</button><button class="btn sm ghost" data-act="pickNone">ניקוי</button></div>
+      <div id="noticeTo"></div>
+      <button class="btn gold block" style="margin-top:12px" data-act="sendNotice">📢 שליחה</button>
+    </div>
+    <h3 class="ttl" style="margin:16px 4px 8px">היסטוריה</h3>
+    <div id="noticeHistory"></div>
   </section>
 
   <section class="page" id="p-log"><div id="log"></div></section>
@@ -221,6 +244,7 @@
 <nav>
   <button class="on" data-tab="customers"><span class="i">👥</span>לקוחות<span class="dot" id="reqDot" hidden></span></button>
   <button data-tab="episodes"><span class="i">🎬</span>פרקים</button>
+  <button data-tab="msgs"><span class="i">💬</span>הודעות</button>
   <button data-tab="log"><span class="i">📜</span>יומן</button>
   <button data-tab="settings"><span class="i">⚙️</span>הגדרות</button>
 </nav>
@@ -333,6 +357,35 @@ function renderEpisodes() {
   $('episodes').innerHTML = html || '<div class="empty">לא נמצאו פרקים</div>';
 }
 
+// ---------------------------------------------------------------- notices
+const picked = new Set();
+const waFormat = (t) => esc(t).replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>');
+const noticePreview = (t) => waFormat(`📢 *הודעה חדשה מראם בוטים ואוטומציות:*\n\n${t.trim() || '…'}`);
+
+function renderNotices() {
+  const list = state.customers;
+  $('noticeTo').innerHTML = list.map((c) => `<label class="pick ${c.canMessage ? '' : 'off'}">
+      <input type="checkbox" data-pick="${c.id}" ${picked.has(c.id) ? 'checked' : ''} ${c.canMessage ? '' : 'disabled'}>
+      <span class="grow"><b>${esc(c.name)}</b> <span class="muted small ltr">+${esc(c.phone)}</span></span>
+      ${c.canMessage ? '' : `<span class="chip">${c.status === 'blocked' ? 'חסום' : 'לא מחובר'}</span>`}
+    </label>`).join('') || '<div class="muted">אין לקוחות.</div>';
+  $('noticeHistory').innerHTML = (state.notices || []).map((n) => `<div class="card hist">
+      <div class="row small muted"><span>${new Date(n.at).toLocaleString('he-IL')}</span></div>
+      <div style="white-space:pre-wrap;margin-top:6px">${waFormat(n.text)}</div>
+      <div class="who">${n.recipients.map((x) => `<span class="chip ${x.status === 'sent' ? 'ok' : x.status === 'failed' ? 'bad' : 'warn'}" title="${esc(x.error || '')}">${x.status === 'sent' ? '✓' : x.status === 'failed' ? '✖' : '⏳'} ${esc(x.name)}</span>`).join('')}</div>
+    </div>`).join('') || '<div class="muted small" style="padding:0 4px">עוד לא נשלחו הודעות.</div>';
+}
+
+function noticeSheet(id) {
+  const c = custById(id);
+  openSheet(`<h2>💬 הודעה ל${esc(c.name)}</h2>
+    <div class="field"><textarea id="oneText" rows="4" placeholder="כתוב כאן את ההודעה…"></textarea></div>
+    <div class="muted small">כך היא תופיע בקבוצה שלו:</div>
+    <div class="bubble" id="onePreview">${noticePreview('')}</div>
+    <button class="btn gold block" style="margin-top:12px" data-act="sendOne" data-id="${id}">📢 שליחה</button>`);
+  $('oneText').oninput = () => ($('onePreview').innerHTML = noticePreview($('oneText').value));
+}
+
 function renderTop() {
   const disk = state.storage.cache + state.storage.media;
   $('stCust').textContent = state.customers.length;
@@ -365,7 +418,7 @@ async function load() {
     if (raw === lastRaw) return;
     lastRaw = raw;
     state = JSON.parse(raw);
-    renderTop(); renderCustomers(); renderEpisodes();
+    renderTop(); renderCustomers(); renderEpisodes(); renderNotices();
   } catch {}
 }
 
@@ -452,6 +505,7 @@ function custMenu(id) {
     ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resendPick" data-id="${id}">📥 שליחה מחדש של פרק</button>` : ''}
     ${!c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="connect" data-id="${id}">📱 חיבור וואטסאפ</button>` : ''}
     ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resetGroup" data-id="${id}">♻️ איפוס הקבוצה</button>` : ''}
+    ${c.canMessage ? `<button class="menu-item" data-act="msgOne" data-id="${id}">💬 שליחת הודעה</button>` : ''}
     <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
     ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
     <button class="menu-item red" data-act="delCust" data-id="${id}">🗑 מחיקת לקוח</button>`);
@@ -569,6 +623,22 @@ const actions = {
   reattach: (b) => episodeForm(epById(b.dataset.id), 'reattach'),
   delEp: (b) => { const e = epById(b.dataset.id); if (confirm(`למחוק את עונה ${e.season} פרק ${e.episode}? בסנכרון הבא הוא יימחק גם אצל הלקוחות.`)) { closeSheet(); run(api('DELETE', `/api/episodes/${e.id}`), 'נמחק'); } },
   addCust: () => customerForm(null),
+  msgOne: (b) => noticeSheet(b.dataset.id),
+  sendOne: (b) => {
+    const text = $('oneText').value;
+    run(api('POST', '/api/notices', { text, customerIds: [b.dataset.id] }), '📢 ההודעה בדרך').then((r) => r && closeSheet());
+  },
+  pickAll: () => { state.customers.filter((c) => c.canMessage).forEach((c) => picked.add(c.id)); renderNotices(); },
+  pickNone: () => { picked.clear(); renderNotices(); },
+  sendNotice: () => {
+    const text = $('noticeText').value;
+    if (!text.trim()) return toast('כתוב הודעה', true);
+    if (!picked.size) return toast('בחר למי לשלוח', true);
+    if (!confirm(`לשלוח את ההודעה ל-${picked.size} לקוחות?`)) return;
+    run(api('POST', '/api/notices', { text, customerIds: [...picked] }), (r) => `📢 נשלחת ל-${r.count} לקוחות`).then((r) => {
+      if (r) { $('noticeText').value = ''; $('noticePreview').innerHTML = noticePreview(''); picked.clear(); }
+    });
+  },
   addEp: () => episodeForm(null, 'new'),
   keep: (b) => run(api('PUT', '/api/settings', { keepDays: Math.max(0, state.settings.keepDays + Number(b.dataset.d)) })),
   reuse: () => run(api('PUT', '/api/settings', { reuseUploads: !state.settings.reuseUploads })),
@@ -591,6 +661,12 @@ document.addEventListener('click', (ev) => {
   }
 });
 $('custSearch').oninput = () => state && renderCustomers();
+$('noticeText').oninput = () => ($('noticePreview').innerHTML = noticePreview($('noticeText').value));
+$('noticePreview').innerHTML = noticePreview('');
+document.addEventListener('change', (ev) => {
+  const id = ev.target.dataset?.pick;
+  if (id) ev.target.checked ? picked.add(id) : picked.delete(id);
+});
 $('epSearch').oninput = () => state && renderEpisodes();
 
 try { const t = localStorage.tab; if (t) document.querySelector(`[data-tab="${t}"]`)?.click(); } catch {}
