@@ -1,6 +1,6 @@
 // Everything done through a customer's own WhatsApp account: creating the
 // "קופה ראשית פרקים" group, syncing episodes into it, and blocking / unblocking.
-import { generateMessageIDV2, getContentType, jidNormalizedUser, normalizeMessageContent, proto } from "baileys";
+import { generateMessageIDV2, getBinaryNodeChild, getContentType, jidNormalizedUser, normalizeMessageContent, proto } from "baileys";
 import {
   BLOCKED_GROUP_NAME,
   EPISODES_GROUP_DESC,
@@ -424,6 +424,10 @@ export async function syncCustomer(c) {
     const reasons = await violations(c, sock, meta);
     if (c.deletedByCustomer?.length) reasons.push(`נמחקו ידנית ${c.deletedByCustomer.length} הודעות בקבוצה`);
     if (reasons.length) return block(c, sock, meta, reasons);
+    if (c.renewLinkPending) {
+      // The manager asked for fresh invite links (old links stop working). Still against the rules for the customer.
+      if (await tryDo("renew link", () => renewInviteLink(c, sock))) addLog(`🔄 ${name}: קישור ההזמנה לקבוצה חודש (הישן כבר לא עובד)`);
+    }
     if (meta.ephemeralDuration) await tryDo("ephemeral off", () => sock.groupToggleEphemeral(c.groupJid, 0));
     // The logo didn't get set when the group was made: try again.
     if (!c.pictureId) await applyGroupLogo(c, sock);
@@ -640,32 +644,65 @@ export async function deleteNotice(c, rec) {
   return true;
 }
 
-/** Resets the group's invite link by the manager's choice (the new one becomes the allowed one). */
-export async function resetGroupLink(c) {
-  if (c.status === "blocked") throw new Error("הלקוח חסום");
-  if (!c.groupJid) throw new Error("אין לו קבוצה עדיין");
-  await customerSession(c.id).use(async (sock) => {
-    const code = (await sock.groupRevokeInvite(c.groupJid)) || (await sock.groupInviteCode(c.groupJid));
-    c.inviteCode = code;
-    c.inviteLink = `https://chat.whatsapp.com/${code}`;
-    save();
-  });
-  addLog(`🔄 ${customerName(c)}: הקישור לקבוצה אופס (הקישור הישן כבר לא עובד)`);
-  return c.inviteLink;
+/** New invite link made by the bot itself (the new code becomes the allowed one). */
+async function renewInviteLink(c, sock) {
+  const code = (await sock.groupRevokeInvite(c.groupJid)) || (await sock.groupInviteCode(c.groupJid));
+  c.inviteCode = code;
+  c.inviteLink = `https://chat.whatsapp.com/${code}`;
+  c.renewLinkPending = false;
+  save();
+  return true;
 }
 
-/** An invite link to the customer's episodes group (opens the group in WhatsApp). */
-export async function groupLink(c) {
+/**
+ * Adds the manager (settings.managerPhone) to the customer's episodes group. If WhatsApp
+ * doesn't allow adding them (their privacy settings), an invite to the group is sent to
+ * the manager instead, from the customer's account.
+ */
+export async function addManager(c) {
+  const name = customerName(c);
   if (c.status === "blocked") throw new Error("הלקוח חסום");
-  if (!c.groupJid) throw new Error("אין לו קבוצה עדיין");
+  if (!c.groupJid) throw new Error("אין לו קבוצה עדיין. סנכרן קודם");
+  const manager = normalizePhone(settings().managerPhone);
+  if (!manager) throw new Error("לא הוגדר מספר מנהל (הגדרות ← מספר המנהל)");
+  if (manager === normalizePhone(c.phone)) throw new Error("המספר של הלקוח הוא מספר המנהל");
+  const managerJid = `${manager}@s.whatsapp.net`;
   await customerSession(c.id).use(async (sock) => {
-    const code = await sock.groupInviteCode(c.groupJid);
-    if (c.inviteCode && code !== c.inviteCode) throw new Error("קישור ההזמנה אופס בידי הלקוח. הוא ייחסם בסנכרון הבא");
-    c.inviteCode ??= code;
-    c.inviteLink = `https://chat.whatsapp.com/${code}`;
-    save();
+    const meta = await groupMeta(sock, c.groupJid);
+    if (!meta) throw new Error("הקבוצה לא קיימת. סנכרן כדי ליצור אותה מחדש");
+    for (const p of meta.participants) {
+      if (await isManager(sock, p)) return addLog(`👑 ${name}: המנהל כבר בקבוצה`);
+    }
+    const [res] = await sock.groupParticipantsUpdate(c.groupJid, [managerJid], "add");
+    if (res?.status === "200") return addLog(`👑 ${name}: המנהל צורף לקבוצה`);
+    if (res?.status === "409") return addLog(`👑 ${name}: המנהל כבר בקבוצה`);
+    // Can't add directly: send an invite. WhatsApp usually returns a one-time invite for
+    // exactly this; otherwise send the group's invite link.
+    const req = res?.content && getBinaryNodeChild(res.content, "add_request");
+    const text = `הזמנה לקבוצה "${EPISODES_GROUP_NAME}" של ${name}`;
+    if (req?.attrs?.code) {
+      await sock.sendMessage(managerJid, {
+        groupInvite: {
+          inviteCode: req.attrs.code,
+          inviteExpiration: Number(req.attrs.expiration) || 0,
+          jid: c.groupJid,
+          subject: meta.subject,
+          text,
+        },
+      });
+    } else {
+      const code = await sock.groupInviteCode(c.groupJid);
+      if (c.inviteCode && code !== c.inviteCode) throw new Error("קישור ההזמנה אופס בידי הלקוח. הוא ייחסם בסנכרון הבא");
+      await sock.sendMessage(managerJid, { text: `${text}:\nhttps://chat.whatsapp.com/${code}` });
+    }
+    addLog(`👑 ${name}: אי אפשר לצרף את המנהל ישירות (קוד ${res?.status || "?"}), נשלחה לו הזמנה לקבוצה בפרטי`);
   });
-  return c.inviteLink;
+}
+
+/** Every active customer's invite link is renewed by the bot on their next sync. */
+export function renewLinksOnNextSync() {
+  for (const c of db().customers) if (c.status !== "blocked") c.renewLinkPending = true;
+  save();
 }
 
 export function queueNotice(c, text, onDone) {

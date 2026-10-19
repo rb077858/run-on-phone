@@ -9,8 +9,7 @@ import {
   customerSession,
   deleteNotice,
   deliveredCount,
-  groupLink,
-  resetGroupLink,
+  addManager,
   queueBlock,
   queueLogout,
   queueNotice,
@@ -19,6 +18,7 @@ import {
   queueSyncAll,
   queueUnblock,
   requestResend,
+  renewLinksOnNextSync,
   resetAllOnNextSync,
 } from "./customers.js";
 import {
@@ -164,14 +164,10 @@ route("DELETE", /^\/api\/notices\/([\w-]+)$/, (_req, [id]) => {
   return { count };
 });
 
-// Invite link to a customer's episodes group: read it, or reset it (the manager's choice).
-route("POST", /^\/api\/customers\/([\w-]+)\/link$/, (_req, [id]) => {
+// Adds the manager to a customer's episodes group (or sends the manager an invite).
+route("POST", /^\/api\/customers\/([\w-]+)\/add-manager$/, (_req, [id]) => {
   const c = mustCustomer(id);
-  return { queued: enqueue(`link:${id}`, `קישור לקבוצה של ${customerName(c)}`, () => groupLink(c)) };
-});
-route("POST", /^\/api\/customers\/([\w-]+)\/link\/reset$/, (_req, [id]) => {
-  const c = mustCustomer(id);
-  return { queued: enqueue(`linkreset:${id}`, `איפוס הקישור של ${customerName(c)}`, () => resetGroupLink(c)) };
+  return { queued: enqueue(`addmgr:${id}`, `צירוף המנהל לקבוצה של ${customerName(c)}`, () => addManager(c)) };
 });
 
 // Messages from the manager to customers' groups, with a small history.
@@ -412,6 +408,13 @@ const RESET_FLAGS = [
 if (RESET_FLAGS.some((f) => !settings()[f])) {
   resetAllOnNextSync();
   for (const f of RESET_FLAGS) settings()[f] = true;
+  save();
+}
+
+// One time: fresh invite links for every group (the old ones may have been shared).
+if (!settings().linksRenewedDone) {
+  renewLinksOnNextSync();
+  settings().linksRenewedDone = true;
   save();
 }
 

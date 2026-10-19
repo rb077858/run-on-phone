@@ -514,8 +514,7 @@ function custMenu(id) {
     ${!c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="connect" data-id="${id}">📱 חיבור וואטסאפ</button>` : ''}
     ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resetGroup" data-id="${id}">♻️ איפוס הקבוצה</button>` : ''}
     ${c.canMessage ? `<button class="menu-item" data-act="msgOne" data-id="${id}">💬 שליחת הודעה</button>` : ''}
-    ${c.canMessage ? `<button class="menu-item" data-act="copyLink" data-id="${id}">📋 העתקת קישור לקבוצה</button>
-      <button class="menu-item" data-act="resetLink" data-id="${id}">🔄 איפוס קישור לקבוצה</button>` : ''}
+    ${c.canMessage ? `<button class="menu-item" data-act="addMgr" data-id="${id}">👑 צירוף המנהל לקבוצה</button>` : ''}
     <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
     ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
     ${c.status !== 'blocked' ? `<button class="menu-item red" data-act="blockCust" data-id="${id}">⛔ חסימה</button>` : `<button class="menu-item" data-act="unblock" data-id="${id}">✅ ביטול חסימה</button>`}
@@ -637,20 +636,10 @@ const actions = {
   msgOne: (b) => noticeSheet(b.dataset.id),
   delNotice: (b) => confirm('למחוק את ההודעה מהקבוצות של כל מי שקיבל אותה?') && run(api('DELETE', `/api/notices/${b.dataset.id}`), (r) => `🗑 נמחקת אצל ${r.count} לקוחות`),
   saveMgr: () => run(api('PUT', '/api/settings', { managerPhone: $('mgrPhone').value }), 'נשמר ✓'),
-  copyLink: (b) => {
+  addMgr: (b) => {
     const c = custById(b.dataset.id);
-    if (!c.inviteLink) {
-      run(api('POST', `/api/customers/${c.id}/link`), 'מביא את הקישור… לחץ שוב בעוד כמה שניות');
-      return;
-    }
     closeSheet();
-    copyText(c.inviteLink).then((ok) => toast(ok ? '📋 הקישור לקבוצה הועתק' : 'לא הצלחתי להעתיק', !ok));
-  },
-  resetLink: (b) => {
-    const c = custById(b.dataset.id);
-    if (!confirm(`לאפס את הקישור לקבוצה של ${c.name}?\nהקישור הישן יפסיק לעבוד, ואחר כך תוכל להעתיק את החדש.`)) return;
-    closeSheet();
-    run(api('POST', `/api/customers/${c.id}/link/reset`), '🔄 מאפס את הקישור…');
+    run(api('POST', `/api/customers/${c.id}/add-manager`), `👑 מצרף את המנהל לקבוצה של ${c.name}…`);
   },
   blockCust: (b) => {
     const c = custById(b.dataset.id);
