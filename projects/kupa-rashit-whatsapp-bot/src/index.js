@@ -213,11 +213,10 @@ route("PUT", /^\/api\/settings$/, async (req) => {
   }
   if (b.reuseUploads != null) st.reuseUploads = !!b.reuseUploads;
   if (b.sendAs === "document" || b.sendAs === "video") st.sendAs = b.sendAs;
-  if (Array.isArray(b.blockWords)) {
-    const seen = new Set();
-    st.blockWords = b.blockWords
-      .map((w) => ({ word: String(w.word || "").trim().slice(0, 40), message: String(w.message || "").trim().slice(0, 1000) }))
-      .filter((w) => w.word && !seen.has(w.word) && seen.add(w.word));
+  if (b.managerPhone != null) {
+    const phone = normalizePhone(b.managerPhone);
+    if (phone && phone.length < 10) throw new Error("מספר טלפון לא תקין");
+    st.managerPhone = phone;
   }
   if (b.resetMaxVideo) st.maxVideoBytes = null;
   save();

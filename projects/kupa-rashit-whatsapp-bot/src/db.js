@@ -22,12 +22,8 @@ export const DEFAULT_SETTINGS = {
   reuseUploads: true, // upload each video to WhatsApp once and reuse it for all customers
   maxVideoBytes: null, // learned: the part size WhatsApp accepted
   sendAs: "document", // "document": every episode as one MP4 file; "video": videos (parts if too big)
-  // A customer who writes one of these words (alone) in their group is blocked on the next
-  // sync. `message`: optional text the bot sends them first (shown in the "blocked" group).
-  blockWords: [
-    { word: "חסימה", message: "" },
-    { word: "חסום", message: "" },
-  ],
+  // The manager's WhatsApp number: may join a customer's group without that being a violation.
+  managerPhone: "972532476787",
 };
 
 let data = empty();
@@ -37,6 +33,7 @@ try {
 
 delete data.manager; // older versions had a manager WhatsApp account
 delete data.settings?.bigAs; // replaced by sendAs
+delete data.settings?.blockWords; // customers can no longer block themselves
 
 export const db = () => data;
 export const settings = () => Object.assign(data.settings, { ...DEFAULT_SETTINGS, ...data.settings });

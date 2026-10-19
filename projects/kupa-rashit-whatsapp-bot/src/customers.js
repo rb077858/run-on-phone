@@ -159,7 +159,20 @@ async function pinWelcome(c, sock) {
 
 const norm = (s) => String(s || "").replace(/\r/g, "").trim();
 
-/** Rule violations in the episodes group (empty array = all good). */
+/** Is this group participant the manager (settings.managerPhone)? */
+async function isManager(sock, p) {
+  const manager = normalizePhone(settings().managerPhone);
+  if (!manager) return false;
+  const num = (jid) => (jid && jid.endsWith("@s.whatsapp.net") ? jidNormalizedUser(jid).split("@")[0] : null);
+  if ([p.id, p.phoneNumber, p.jid].some((j) => num(j) === manager)) return true;
+  // A hidden id (@lid) without the number: ask Baileys' LID ↔ number mapping.
+  if (p.id?.endsWith("@lid")) {
+    const pn = await tryDo("lid → pn", () => sock.signalRepository?.lidMapping?.getPNForLID?.(p.id));
+    if (num(pn) === manager) return true;
+  }
+  return false;
+}
+
 // Every group has an invite link from the start; it changes only when someone resets it.
 // Reading it doesn't create or change it. The code from when the group was made is kept,
 // and a different code later means the customer reset the link (against the rules).
@@ -173,11 +186,15 @@ async function rememberInviteCode(c, sock) {
   save();
 }
 
+/** Rule violations in the episodes group (empty array = all good). */
 async function violations(c, sock, meta) {
   const reasons = [];
   if (meta.subject !== EPISODES_GROUP_NAME) reasons.push(`שם הקבוצה שונה ל-"${meta.subject}"`);
   if (norm(meta.desc) !== norm(c.groupDesc ?? EPISODES_GROUP_DESC)) reasons.push("תיאור הקבוצה שונה");
-  if (meta.participants.length > 1) reasons.push(`צורפו ${meta.participants.length - 1} משתתפים לקבוצה`);
+  // Everyone but the customer, except the manager (who may join a customer's group).
+  const added = [];
+  for (const p of meta.participants) if (!(await isManager(sock, p))) added.push(p);
+  if (added.length > 1) reasons.push(`צורפו ${added.length - 1} משתתפים לקבוצה`);
   const pic = await groupPictureId(sock, meta.id);
   if (pic) {
     if (c.pictureId && pic.id !== c.pictureId) reasons.push(pic.id ? "תמונת הקבוצה הוחלפה" : "תמונת הקבוצה נמחקה");
@@ -286,7 +303,8 @@ function onCustomerMessages(s, { messages }) {
   if (!c?.groupJid) return;
   let changed = false;
   for (const m of messages) {
-    if (m.key.remoteJid !== c.groupJid || !m.message) continue;
+    // Only the customer's own messages (their account): the manager may be in the group too.
+    if (m.key.remoteJid !== c.groupJid || !m.message || !m.key.fromMe) continue;
     const content = normalizeMessageContent(m.message);
     const type = getContentType(content);
     // "Delete for everyone" arrives as a protocol message pointing at the deleted message.
@@ -327,29 +345,9 @@ function requestedEpisode(c, req) {
   return m ? findEpisode(Number(m[1]), Number(m[2])) || null : null;
 }
 
-// A customer who writes one of the block words (settings, alone in the message) in their
-// group is blocked on the next sync.
-const cleanWord = (t) => String(t || "").replace(/[\s.!?,"'״׳]+/g, " ").trim().toLowerCase();
-
-function blockWordIn(c) {
-  const words = settings().blockWords || [];
-  for (const req of c.inbox || []) {
-    const w = words.find((x) => x.word && cleanWord(x.word) === cleanWord(req.text));
-    if (w) return w;
-  }
-  return null;
-}
-
-/** Handles the customer's messages. Returns the block word entry if they asked to be blocked. */
+/** Handles the customer's messages (requests to send an episode again). */
 async function handleInbox(c, sock) {
   const name = customerName(c);
-  const asked = blockWordIn(c);
-  if (asked) {
-    for (const req of c.inbox) if (req.key) markBotDeleted(req.id); // the group is deleted anyway
-    c.inbox = [];
-    save();
-    return asked;
-  }
   for (const req of c.inbox || []) {
     if (req.key) await deleteSent(sock, c.groupJid, req); // keep the group videos-only
     const ep = requestedEpisode(c, req);
@@ -440,8 +438,7 @@ export async function syncCustomer(c) {
 
     if (c.welcome && Date.now() - (c.welcome.pinnedAt || 0) > 25 * 86400_000) await pinWelcome(c, sock);
 
-    const asked = await handleInbox(c, sock);
-    if (asked) return block(c, sock, meta, [`הלקוח כתב "${asked.word}" בקבוצה`], "self", asked.message);
+    await handleInbox(c, sock);
 
     // Messages of deleted/changed episodes, duplicates and leftovers of a different split.
     const episodes = new Map(db().episodes.map((e) => [e.id, e]));
@@ -512,7 +509,7 @@ export async function syncCustomer(c) {
 // ------------------------------------------------------------ block/unblock
 const selfIds = (sock) => new Set([sock.user?.id, sock.user?.lid].filter(Boolean).map((j) => jidNormalizedUser(j)));
 
-async function block(c, sock, meta, reasons, kind = "violation", firstMessage = "") {
+async function block(c, sock, meta, reasons, kind = "violation") {
   const name = customerName(c);
   addLog(`⛔ ${name}: ${kind === "violation" ? "הפרת כללים – " : ""}${reasons.join(", ")}. חוסם.`);
   const jid = c.groupJid;
@@ -547,7 +544,6 @@ async function block(c, sock, meta, reasons, kind = "violation", firstMessage = 
   // on their phone so they can read it, but they can't write in it.
   const blockJid = await createLockedGroup(sock, BLOCKED_GROUP_NAME);
   await tryDo("blocked picture", () => setGroupPicture(sock, blockJid, BLOCKED_LOGO));
-  if (firstMessage?.trim()) await tryDo("block word message", () => sock.sendMessage(blockJid, { text: firstMessage.trim() }));
   const msg = await sock.sendMessage(blockJid, { text: blockedMessage(kind) });
   await sleep(1500);
   await tryDo("leave block group", () => sock.groupLeave(blockJid));

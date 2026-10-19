@@ -60,12 +60,11 @@ export const WELCOME_MESSAGE = [
   `נוצר על ידי ${BRAND} 🤖✨`,
 ].join("\n");
 
-/** The one message in the "blocked" group. kind: "violation" | "manual" | "self". */
+/** The one message in the "blocked" group. kind: "violation" | "manual". */
 export function blockedMessage(kind) {
   const why = {
     violation: [`זוהתה הפרה של כללי הקבוצה "${EPISODES_GROUP_NAME}":`, "צירוף משתתפים, שינוי פרטי הקבוצה, מחיקת הודעות או איפוס קישור ההזמנה."],
     manual: ["הגישה שלך לפרקים נחסמה על ידי המנהל."],
-    self: ["החסימה בוצעה לבקשתך."],
   }[kind];
   return [
     `⛔ *נחסמת על ידי ${BRAND}*`,
