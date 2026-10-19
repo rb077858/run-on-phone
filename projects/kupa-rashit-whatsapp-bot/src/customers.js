@@ -644,6 +644,20 @@ export async function deleteNotice(c, rec) {
   return true;
 }
 
+/** Resets the group's invite link by the manager's choice (the new one becomes the allowed one). */
+export async function resetGroupLink(c) {
+  if (c.status === "blocked") throw new Error("הלקוח חסום");
+  if (!c.groupJid) throw new Error("אין לו קבוצה עדיין");
+  await customerSession(c.id).use(async (sock) => {
+    const code = (await sock.groupRevokeInvite(c.groupJid)) || (await sock.groupInviteCode(c.groupJid));
+    c.inviteCode = code;
+    c.inviteLink = `https://chat.whatsapp.com/${code}`;
+    save();
+  });
+  addLog(`🔄 ${customerName(c)}: הקישור לקבוצה אופס (הקישור הישן כבר לא עובד)`);
+  return c.inviteLink;
+}
+
 /** An invite link to the customer's episodes group (opens the group in WhatsApp). */
 export async function groupLink(c) {
   if (c.status === "blocked") throw new Error("הלקוח חסום");

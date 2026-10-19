@@ -199,16 +199,6 @@
     <div id="noticeHistory"></div>
   </section>
 
-  <section class="page" id="p-links">
-    <div class="card">
-      <h3 class="ttl">🔗 קישורים לקבוצות</h3>
-      <p class="muted small" style="margin:0 0 10px">לכל לקוח יש קישור אישי שפותח את קבוצת הפרקים שלו בוואטסאפ (אי אפשר קישור אחד לכולם: וואטסאפ לא יודע מי לחץ). קישור לקבוצה לא יכול לכתוב בה טקסט מוכן, לכן "שליחה ללקוח" פותח אצלך צ'אט איתו, עם ההודעה שכתבת כאן והקישור מוכנים לשליחה.</p>
-      <div class="field"><textarea id="linkText" rows="2" placeholder="הודעה שתישלח עם הקישור (לא חובה)"></textarea></div>
-      <button class="btn block" data-act="linksAll">🔗 יצירת קישורים לכל המחוברים</button>
-    </div>
-    <div id="links"></div>
-  </section>
-
   <section class="page" id="p-log"><div id="log"></div></section>
 
   <section class="page" id="p-settings">
@@ -264,7 +254,6 @@
   <button class="on" data-tab="customers"><span class="i">👥</span>לקוחות<span class="dot" id="reqDot" hidden></span></button>
   <button data-tab="episodes"><span class="i">🎬</span>פרקים</button>
   <button data-tab="msgs"><span class="i">💬</span>הודעות</button>
-  <button data-tab="links"><span class="i">🔗</span>קישורים</button>
   <button data-tab="log"><span class="i">📜</span>יומן</button>
   <button data-tab="settings"><span class="i">⚙️</span>הגדרות</button>
 </nav>
@@ -406,25 +395,6 @@ function renderBlockWords() {
     </div>`).join('') || '<div class="muted small">אין מילות חסימה.</div>';
 }
 
-function linkMessage(c) {
-  const t = $('linkText').value.trim();
-  return `${t ? t + '\n\n' : ''}🎬 קבוצת הפרקים שלך:\n${c.inviteLink}`;
-}
-
-function renderLinks() {
-  $('links').innerHTML = state.customers.map((c) => {
-    const body = !c.canMessage
-      ? `<div class="muted small">${c.status === 'blocked' ? 'חסום' : 'הוואטסאפ לא מחובר'}</div>`
-      : c.inviteLink
-        ? `<div class="ltr small" style="word-break:break-all;margin:6px 0">${esc(c.inviteLink)}</div>
-           <div class="row"><button class="btn sm gold" data-act="copyLink" data-id="${c.id}">📋 העתקה</button>
-           <a class="btn sm" href="https://wa.me/${esc(c.phone)}?text=${encodeURIComponent(linkMessage(c))}" target="_blank" data-link="${c.id}">📤 שליחה ללקוח</a>
-           <button class="btn sm ghost" data-act="makeLink" data-id="${c.id}">🔄</button></div>`
-        : `<button class="btn sm" data-act="makeLink" data-id="${c.id}">🔗 יצירת קישור</button>`;
-    return `<div class="card"><div class="row"><b class="grow">${esc(c.name)}</b><span class="muted small ltr">+${esc(c.phone)}</span></div>${body}</div>`;
-  }).join('') || '<div class="muted">אין לקוחות.</div>';
-}
-
 function noticeSheet(id) {
   const c = custById(id);
   openSheet(`<h2>💬 הודעה ל${esc(c.name)}</h2>
@@ -467,7 +437,7 @@ async function load() {
     if (raw === lastRaw) return;
     lastRaw = raw;
     state = JSON.parse(raw);
-    renderTop(); renderCustomers(); renderEpisodes(); renderNotices(); renderBlockWords(); renderLinks();
+    renderTop(); renderCustomers(); renderEpisodes(); renderNotices(); renderBlockWords();
   } catch {}
 }
 
@@ -555,6 +525,8 @@ function custMenu(id) {
     ${!c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="connect" data-id="${id}">📱 חיבור וואטסאפ</button>` : ''}
     ${c.wa.linked && c.status !== 'blocked' ? `<button class="menu-item" data-act="resetGroup" data-id="${id}">♻️ איפוס הקבוצה</button>` : ''}
     ${c.canMessage ? `<button class="menu-item" data-act="msgOne" data-id="${id}">💬 שליחת הודעה</button>` : ''}
+    ${c.canMessage ? `<button class="menu-item" data-act="copyLink" data-id="${id}">📋 העתקת קישור לקבוצה</button>
+      <button class="menu-item" data-act="resetLink" data-id="${id}">🔄 איפוס קישור לקבוצה</button>` : ''}
     <button class="menu-item" data-act="editCust" data-id="${id}">✏️ עריכת פרטים</button>
     ${c.wa.linked ? `<button class="menu-item" data-act="logout" data-id="${id}">🔌 ניתוק הוואטסאפ</button>` : ''}
     ${c.status !== 'blocked' ? `<button class="menu-item red" data-act="blockCust" data-id="${id}">⛔ חסימה</button>` : `<button class="menu-item" data-act="unblock" data-id="${id}">✅ ביטול חסימה</button>`}
@@ -690,13 +662,21 @@ const actions = {
     $('bwWord').value = w.word; $('bwMsg').value = w.message || ''; $('bwWord').focus();
     toast('ערוך ולחץ "הוספת מילה" כדי לשמור');
   },
-  makeLink: (b) => run(api('POST', `/api/customers/${b.dataset.id}/link`), 'יוצר קישור…'),
-  linksAll: () => {
-    const list = state.customers.filter((c) => c.canMessage);
-    if (!list.length) return toast('אין לקוחות מחוברים', true);
-    Promise.all(list.map((c) => api('POST', `/api/customers/${c.id}/link`))).then(() => toast(`יוצר ${list.length} קישורים…`), (e) => toast(e.message, true));
+  copyLink: (b) => {
+    const c = custById(b.dataset.id);
+    if (!c.inviteLink) {
+      run(api('POST', `/api/customers/${c.id}/link`), 'מביא את הקישור… לחץ שוב בעוד כמה שניות');
+      return;
+    }
+    closeSheet();
+    copyText(c.inviteLink).then((ok) => toast(ok ? '📋 הקישור לקבוצה הועתק' : 'לא הצלחתי להעתיק', !ok));
   },
-  copyLink: (b) => { const c = custById(b.dataset.id); copyText(linkMessage(c)).then((ok) => toast(ok ? '📋 הועתק (הודעה + קישור)' : 'לא הצלחתי להעתיק', !ok)); },
+  resetLink: (b) => {
+    const c = custById(b.dataset.id);
+    if (!confirm(`לאפס את הקישור לקבוצה של ${c.name}?\nהקישור הישן יפסיק לעבוד, ואחר כך תוכל להעתיק את החדש.`)) return;
+    closeSheet();
+    run(api('POST', `/api/customers/${c.id}/link/reset`), '🔄 מאפס את הקישור…');
+  },
   blockCust: (b) => {
     const c = custById(b.dataset.id);
     if (!confirm(`לחסום את ${c.name}?\nהקבוצה שלו תימחק, ותיווצר לו קבוצת "נחסמת" עם הודעה. רק אתה תוכל לבטל.`)) return;
@@ -740,7 +720,6 @@ document.addEventListener('click', (ev) => {
   }
 });
 $('custSearch').oninput = () => state && renderCustomers();
-$('linkText').oninput = () => state && renderLinks();
 $('noticeText').oninput = () => ($('noticePreview').innerHTML = noticePreview($('noticeText').value));
 $('noticePreview').innerHTML = noticePreview('');
 document.addEventListener('change', (ev) => {

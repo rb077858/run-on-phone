@@ -10,6 +10,7 @@ import {
   deleteNotice,
   deliveredCount,
   groupLink,
+  resetGroupLink,
   queueBlock,
   queueLogout,
   queueNotice,
@@ -163,10 +164,14 @@ route("DELETE", /^\/api\/notices\/([\w-]+)$/, (_req, [id]) => {
   return { count };
 });
 
-// Invite link to a customer's episodes group.
+// Invite link to a customer's episodes group: read it, or reset it (the manager's choice).
 route("POST", /^\/api\/customers\/([\w-]+)\/link$/, (_req, [id]) => {
   const c = mustCustomer(id);
   return { queued: enqueue(`link:${id}`, `קישור לקבוצה של ${customerName(c)}`, () => groupLink(c)) };
+});
+route("POST", /^\/api\/customers\/([\w-]+)\/link\/reset$/, (_req, [id]) => {
+  const c = mustCustomer(id);
+  return { queued: enqueue(`linkreset:${id}`, `איפוס הקישור של ${customerName(c)}`, () => resetGroupLink(c)) };
 });
 
 // Messages from the manager to customers' groups, with a small history.
@@ -398,7 +403,13 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0; // uploads of big videos can take a while
 
 // One time per such version: every customer gets a new group (this time: with the new logo).
-const RESET_FLAGS = ["resetForFilesDone", "resetForLogoDone", "resetForThumbDone", "resetForNoDeleteRuleDone"];
+const RESET_FLAGS = [
+  "resetForFilesDone",
+  "resetForLogoDone",
+  "resetForThumbDone",
+  "resetForNoDeleteRuleDone",
+  "resetForInviteRuleDone",
+];
 if (RESET_FLAGS.some((f) => !settings()[f])) {
   resetAllOnNextSync();
   for (const f of RESET_FLAGS) settings()[f] = true;
