@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1040">
+<title>אקינטור</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="sky" aria-hidden="true"></div>
+
+<main id="app">
+  <!-- Genie: stays on top of every screen, its mood changes with the game -->
+  <div class="genie-wrap" id="genieWrap">
+    <svg class="genie" viewBox="0 0 200 200" aria-hidden="true">
+      <defs>
+        <radialGradient id="ball" cx="40%" cy="35%" r="65%">
+          <stop offset="0" stop-color="#e9f7ff"/>
+          <stop offset=".45" stop-color="#7fd3ff"/>
+          <stop offset="1" stop-color="#3a3fb8"/>
+        </radialGradient>
+        <linearGradient id="turban" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ffffff"/>
+          <stop offset="1" stop-color="#d9d2ff"/>
+        </linearGradient>
+        <linearGradient id="robe" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#a6403f"/>
+          <stop offset="1" stop-color="#6d1f2a"/>
+        </linearGradient>
+      </defs>
+      <ellipse cx="100" cy="190" rx="70" ry="8" fill="#000" opacity=".25"/>
+      <path d="M38 196c4-44 26-66 62-66s58 22 62 66z" fill="url(#robe)"/>
+      <path d="M86 132l14 26 14-26" fill="#f6c453"/>
+      <circle cx="100" cy="98" r="36" fill="#f2c79b"/>
+      <path class="eye" d="M84 96q5-5 10 0" stroke="#3b2316" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+      <path class="eye" d="M106 96q5-5 10 0" stroke="#3b2316" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+      <path class="brow" d="M80 86q8-6 16-2M104 84q8-4 16 2" stroke="#3b2316" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M86 112q14 10 28 0" stroke="#3b2316" stroke-width="3" fill="none" stroke-linecap="round" class="mouth"/>
+      <path d="M78 116q22 26 44 0q-4 30-22 30t-22-30z" fill="#2b1a12"/>
+      <path d="M58 82c-4-30 18-48 42-48s46 18 42 48c-10-10-26-14-42-14s-32 4-42 14z" fill="url(#turban)"/>
+      <path d="M64 70q36-22 72 0" stroke="#c9bfff" stroke-width="3" fill="none"/>
+      <circle cx="100" cy="64" r="8" fill="#e04866" stroke="#f6c453" stroke-width="3"/>
+      <path d="M100 56q10-22 4-32" stroke="#f6c453" stroke-width="3" fill="none"/>
+      <g class="ball">
+        <circle cx="100" cy="172" r="20" fill="url(#ball)"/>
+        <ellipse cx="94" cy="165" rx="6" ry="4" fill="#fff" opacity=".7"/>
+      </g>
+      <path d="M70 176q10-10 14 0M130 176q-10-10-14 0" stroke="#f2c79b" stroke-width="9" fill="none" stroke-linecap="round"/>
+    </svg>
+    <div class="bubble" id="bubble" hidden></div>
+  </div>
+
+  <!-- Language picker -->
+  <section class="screen" id="screenHome">
+    <h1 class="title">אקינטור</h1>
+    <p class="subtitle">חשבו על דמות, אמיתית או דמיונית, ואני אנחש מי היא</p>
+    <h2 class="label">בחרו שפה</h2>
+    <div class="langs" id="langs"></div>
+    <label class="toggle">
+      <input type="checkbox" id="childMode">
+      <span class="switch"></span>
+      <span>מצב ילדים (בלי שאלות לא מתאימות)</span>
+    </label>
+    <button class="btn primary big" id="playBtn" disabled>בואו נשחק</button>
+    <p class="stats" id="stats"></p>
+  </section>
+
+  <!-- Question -->
+  <section class="screen" id="screenGame" hidden>
+    <div class="meta">
+      <span id="qNum"></span>
+      <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
+    </div>
+    <div class="card">
+      <p class="question" id="question" dir="auto"></p>
+    </div>
+    <div class="answers" id="answers"></div>
+    <div class="row">
+      <button class="btn ghost" id="backBtn"></button>
+      <button class="btn ghost" id="quitBtn"></button>
+    </div>
+  </section>
+
+  <!-- Guess -->
+  <section class="screen" id="screenGuess" hidden>
+    <p class="label" id="guessIntro"></p>
+    <div class="card guess">
+      <div class="photo" id="photoWrap"><img id="photo" alt=""></div>
+      <h2 class="guess-name" id="guessName" dir="auto"></h2>
+      <p class="guess-desc" id="guessDesc" dir="auto"></p>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="yesBtn"></button>
+      <button class="btn danger" id="noBtn"></button>
+    </div>
+  </section>
+
+  <!-- End -->
+  <section class="screen" id="screenEnd" hidden>
+    <h2 class="title small" id="endTitle"></h2>
+    <p class="subtitle" id="endText"></p>
+    <button class="btn primary big" id="againBtn"></button>
+    <button class="btn ghost" id="homeBtn"></button>
+  </section>
+
+  <div class="toast" id="toast" hidden></div>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

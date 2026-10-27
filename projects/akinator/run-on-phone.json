@@ -1,0 +1,9 @@
+{
+  "name": "אקינטור",
+  "description": "המשחק שמנחש כל דמות שחשבתם עליה",
+  "entry": "server.js",
+  "ui": [
+    { "label": "שחקו", "path": "/" }
+  ],
+  "exclude": ["data"]
+}
