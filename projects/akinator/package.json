@@ -1,0 +1,15 @@
+{
+  "name": "akinator",
+  "version": "1.0.0",
+  "description": "Akinator game with a styled mobile UI, built on aki-api",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "mock": "AKI_MOCK=1 node server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "aki-api": "^7.0.1"
+  },
+  "private": true
+}
