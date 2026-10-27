@@ -8,7 +8,8 @@
 //   node publish.mjs <projectDir> --info     print the project's code
 //
 // The project must contain run-on-phone.json (see ../PROJECT_PROMPT.md).
-// Credentials: publisher/service-account.json, or GOOGLE_APPLICATION_CREDENTIALS.
+// Credentials: publisher/service-account.json, or GOOGLE_APPLICATION_CREDENTIALS, or
+// a signed-in Google account (gcloud auth application-default login) with GOOGLE_CLOUD_PROJECT set.
 
 import AdmZip from "adm-zip";
 import { execSync } from "node:child_process";
@@ -151,14 +152,17 @@ if (dryRun) {
 }
 
 // ------------------------------------------------------------------ firebase
+const { initializeApp, cert, applicationDefault } = await import("firebase-admin/app");
+const { getFirestore, FieldValue } = await import("firebase-admin/firestore");
 const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(here, "service-account.json");
-if (!fs.existsSync(credPath)) {
+if (fs.existsSync(credPath)) {
+  initializeApp({ credential: cert(JSON.parse(fs.readFileSync(credPath, "utf8"))) });
+} else if (process.env.GOOGLE_CLOUD_PROJECT) {
+  // No key file: use the signed-in Google account (gcloud auth application-default login).
+  initializeApp({ credential: applicationDefault(), projectId: process.env.GOOGLE_CLOUD_PROJECT });
+} else {
   fail(`Firebase service account key not found at ${credPath}\n  See SETUP.md (step "service account").`);
 }
-const { initializeApp, cert } = await import("firebase-admin/app");
-const { getFirestore, FieldValue } = await import("firebase-admin/firestore");
-const serviceAccount = JSON.parse(fs.readFileSync(credPath, "utf8"));
-initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 const projects = db.collection("projects");
 
