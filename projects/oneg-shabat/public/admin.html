@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>עונג שבת – ניהול</title>
+  <meta name="theme-color" content="#1e3a5f">
+  <link rel="icon" href="favicon.svg">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .card h2 { display: flex; align-items: center; gap: 8px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .grow { flex: 1 1 160px; }
+    button, select, input, textarea {
+      font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+      border-radius: 10px; padding: 9px 12px; min-height: 42px;
+    }
+    textarea { width: 100%; min-height: 70px; resize: vertical; }
+    input[type=text], input[type=tel], input[type=number], select { width: 100%; }
+    input[type=checkbox] { min-height: 0; width: 20px; height: 20px; accent-color: var(--brand); }
+    button { cursor: pointer; font-weight: 600; background: var(--card); }
+    button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+    button.gold { background: var(--gold); color: #1d1607; border-color: var(--gold); }
+    button.danger { color: var(--no); border-color: var(--no); }
+    button:disabled { opacity: .5; cursor: default; }
+    label.f { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    label.chk { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+    .qr { display: block; margin: 12px auto; width: 260px; max-width: 100%; background: #fff; padding: 8px; border-radius: 12px; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+    .kv b { color: var(--muted); font-weight: 600; }
+    .poll { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+    .poll:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+    .poll h3 { margin: 0 0 6px; font-size: 16px; }
+    .person { display: grid; grid-template-columns: 1fr 120px; gap: 6px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+    .person .nm { font-weight: 600; }
+    .person .st { font-size: 12px; }
+    .st.coming { color: var(--ok); } .st.maybe { color: var(--mb); } .st.notComing { color: var(--no); } .st.none { color: var(--muted); }
+    .person input { grid-column: 1 / -1; min-height: 36px; padding: 6px 10px; font-size: 14px; }
+    .toast { position: fixed; inset-inline: 16px; bottom: 16px; max-width: 520px; margin: 0 auto; background: var(--ink); color: var(--card); padding: 12px 16px; border-radius: 12px; text-align: center; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    .toast.show { opacity: .95; }
+    .big-code { font-size: 32px; font-weight: 800; letter-spacing: 4px; text-align: center; margin: 8px 0; direction: ltr; }
+    details summary { cursor: pointer; font-weight: 600; }
+    .link { word-break: break-all; direction: ltr; text-align: left; font-size: 14px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .dot.on { background: var(--ok); } .dot.off { background: var(--no); } .dot.wait { background: var(--gold); }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <div class="brand"><span class="candles">⚙️</span><h1>ניהול עונג שבת</h1></div>
+      <div class="meta"><span id="hday"></span><span id="hstatus" class="pill"></span></div>
+    </div>
+  </header>
+  <main class="wrap" id="main"><div class="loading">טוען…</div></main>
+  <div class="toast" id="toast"></div>
+  <script src="admin.js"></script>
+</body>
+</html>
