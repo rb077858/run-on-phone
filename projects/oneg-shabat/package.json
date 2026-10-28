@@ -1,0 +1,17 @@
+{
+  "name": "oneg-shabat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WhatsApp bot that summarizes the Oneg Shabat group polls",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "pino": "^9.7.0",
+    "qrcode": "^1.5.4"
+  }
+}

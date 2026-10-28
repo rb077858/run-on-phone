@@ -1,0 +1,4 @@
+node_modules/
+data/
+# Firebase writer credentials (created by deploy/setup-firebase.mjs, shipped only in the phone package)
+firebase-writer.json

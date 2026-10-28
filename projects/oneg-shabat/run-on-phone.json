@@ -1,0 +1,11 @@
+{
+  "name": "עונג שבת",
+  "description": "מסנכרן את סקרי קבוצת עונג שבת ומציג סיכום חי",
+  "entry": "index.js",
+  "nodeOptions": ["--max-old-space-size=256"],
+  "ui": [
+    { "label": "סיכום", "path": "/" },
+    { "label": "ממשק ניהול", "path": "/admin" }
+  ],
+  "exclude": ["data", "deploy", "pc", "README.md", ".gitignore"]
+}
