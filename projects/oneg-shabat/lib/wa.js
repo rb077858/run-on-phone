@@ -24,7 +24,7 @@ const sha256hex = (s) => crypto.createHash("sha256").update(Buffer.from(s || "")
 
 export function createWhatsApp({ db, dataDir, onChange }) {
   const authDir = path.join(dataDir, "auth");
-  const state = { status: "starting", qr: null, qrDataUrl: null, me: null, error: null };
+  const state = { status: "starting", qr: null, qrDataUrl: null, me: null, error: null, pairing: null };
   let sock = null;
   let stopping = false;
   let retry = 0;
@@ -302,7 +302,7 @@ export function createWhatsApp({ db, dataDir, onChange }) {
       if (u.connection === "open") {
         retry = 0;
         state.status = "open";
-        state.qr = state.qrDataUrl = state.error = null;
+        state.qr = state.qrDataUrl = state.error = state.pairing = null;
         state.me = sock.user;
         console.log(`✅ WhatsApp connected as ${sock.user?.id?.split(":")[0]}`);
         learnName(sock.user?.id, sock.user?.name);
@@ -350,7 +350,11 @@ export function createWhatsApp({ db, dataDir, onChange }) {
   async function requestPairingCode(phone) {
     if (!sock || sock.authState?.creds?.registered) throw new Error("כבר מחובר");
     const digits = String(phone).replace(/\D/g, "").replace(/^0/, "972");
-    return sock.requestPairingCode(digits);
+    if (digits.length < 11) throw new Error("מספר טלפון לא תקין");
+    const raw = await sock.requestPairingCode(digits);
+    const code = raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
+    state.pairing = { code, phone: digits, at: Date.now() };
+    return code;
   }
 
   async function logout() {

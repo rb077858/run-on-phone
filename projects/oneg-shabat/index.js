@@ -136,7 +136,14 @@ function adminState() {
     })
     .sort((a, b) => a.name.localeCompare(b.name, "he"));
   return {
-    wa: { status: wa.state.status, qr: wa.state.qrDataUrl, me: wa.state.me?.id?.split(":")[0] || null, error: wa.state.error },
+    wa: {
+      status: wa.state.status,
+      qr: wa.state.qrDataUrl,
+      me: wa.state.me?.id?.split(":")[0] || null,
+      error: wa.state.error,
+      // Pairing codes are valid for a few minutes.
+      pairing: wa.state.pairing && Date.now() - wa.state.pairing.at < 3 * 60_000 ? wa.state.pairing : null,
+    },
     settings: s,
     groupJid: jid,
     groups: Object.entries(db.data.groups)
