@@ -275,7 +275,8 @@ export function createWhatsApp({ db, dataDir, onChange }) {
       ...(version ? { version } : {}),
       auth,
       logger,
-      browser: Browsers.ubuntu("Oneg Shabat Bot"),
+      // Linking with a pairing code works only with a standard browser name (a custom one is rejected).
+      browser: Browsers.macOS("Chrome"),
       markOnlineOnConnect: false,
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => true,
@@ -319,12 +320,12 @@ export function createWhatsApp({ db, dataDir, onChange }) {
           console.log("⚠ WhatsApp logged out – deleting the session and showing a new QR");
           fs.rmSync(authDir, { recursive: true, force: true });
           state.me = null;
-          setTimeout(start, 1000);
+          reconnect(1000);
           return;
         }
         const delay = Math.min(60_000, 2000 * 2 ** retry++);
         console.log(`WhatsApp disconnected (${code || state.error}); reconnecting in ${delay / 1000}s`);
-        setTimeout(() => !stopping && start().catch((e) => console.error(e)), delay);
+        reconnect(delay);
       }
     });
     sock.ev.on("messages.upsert", ({ messages }) => handleMessages(messages));
@@ -347,13 +348,51 @@ export function createWhatsApp({ db, dataDir, onChange }) {
     });
   }
 
+  let reconnectTimer = null;
+  function reconnect(ms) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => !stopping && start().catch((e) => console.error("WhatsApp start failed:", e)), ms);
+  }
+
+  // Closes the current socket and starts a new one on a clean session.
+  async function restartFresh() {
+    clearTimeout(reconnectTimer);
+    stopping = true;
+    sock?.end?.(undefined);
+    fs.rmSync(authDir, { recursive: true, force: true });
+    state.me = state.pairing = null;
+    stopping = false;
+    await start();
+  }
+
+  async function waitForStatus(status, ms) {
+    for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 200)))
+      if (state.status === status) return true;
+    return false;
+  }
+
   async function requestPairingCode(phone) {
-    if (!sock || sock.authState?.creds?.registered) throw new Error("כבר מחובר");
+    if (sock?.authState?.creds?.registered && state.status === "open") throw new Error("כבר מחובר");
     const digits = String(phone).replace(/\D/g, "").replace(/^0/, "972");
-    if (digits.length < 11) throw new Error("מספר טלפון לא תקין");
-    const raw = await sock.requestPairingCode(digits);
+    if (digits.length < 11 || digits.length > 15) throw new Error("מספר טלפון לא תקין");
+    // Every request starts from a clean session, so leftovers of earlier attempts can't interfere.
+    await restartFresh();
+    if (!(await waitForStatus("qr", 30_000))) throw new Error("החיבור לוואטסאפ לא מוכן, נסו שוב");
+    const s = sock;
+    // WhatsApp answers the request with an error when it rejects it; Baileys does not wait for that.
+    let rejected = null;
+    const onError = (node) => (rejected = node?.content?.[0]?.attrs || {});
+    s.ws.on("CB:iq,type:error", onError);
+    const raw = await s.requestPairingCode(digits);
+    await new Promise((r) => setTimeout(r, 3000));
+    s.ws.off("CB:iq,type:error", onError);
+    if (rejected) {
+      console.error("pairing code rejected:", rejected);
+      throw new Error(`וואטסאפ דחה את הבקשה (${rejected.code || ""} ${rejected.text || ""}). בדקו שזה המספר של חשבון וואטסאפ פעיל.`);
+    }
     const code = raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
     state.pairing = { code, phone: digits, at: Date.now() };
+    console.log(`🔑 pairing code requested for +${digits}`);
     return code;
   }
 
@@ -361,11 +400,7 @@ export function createWhatsApp({ db, dataDir, onChange }) {
     try {
       await sock?.logout();
     } catch {}
-    sock?.end?.(undefined);
-    fs.rmSync(authDir, { recursive: true, force: true });
-    state.me = null;
-    stopping = false;
-    setTimeout(start, 1000);
+    await restartFresh();
   }
 
   async function sendToSelf(text) {
