@@ -7,6 +7,7 @@
   let S = null;
   let peopleFilter = "";
   let pairPhone = "";
+  let pairError = "";
   try {
     pairPhone = localStorage.getItem("pairPhone") || "";
   } catch {}
@@ -66,7 +67,9 @@
       return `<section class="card"><h2><span class="dot wait"></span>חיבור וואטסאפ</h2>
         <div class="sub">מזינים את המספר של הטלפון שנמצא בקבוצת עונג שבת (גם אם זה הטלפון הזה) ומקבלים קוד לחיבור, בלי לסרוק.</div>
         <div class="row"><input class="grow" type="tel" id="pairPhone" inputmode="tel" placeholder="050-1234567" value="${esc(pairPhone)}"><button class="primary" id="pairBtn">${w.pairing ? "קוד חדש" : "קבל קוד"}</button></div>
+        ${pairError ? `<div class="sub" style="color:var(--no);margin-top:8px">⚠ ${esc(pairError)}</div>` : ""}
         ${pairing}
+        ${w.pairing ? `<div class="sub" style="margin-top:8px">לא הגיעה התראה ולא מצליח? בקשו קוד חדש ונסו שוב תוך דקה.</div>` : ""}
         <details ${openDetails.has("qr") ? "open" : ""} data-key="qr" style="margin-top:12px"><summary>או: סריקת ברקוד מטלפון אחר</summary>
           <div class="sub" style="margin-top:6px">בטלפון שבקבוצה: וואטסאפ ← מכשירים מקושרים ← קישור מכשיר, וסורקים:</div>
           <img class="qr" src="${w.qr}" alt="QR"></details></section>`;
@@ -215,7 +218,11 @@
       } catch {}
       t.disabled = true;
       t.textContent = "מבקש קוד…";
-      return act({ action: "pair", phone: pairPhone }, "הקוד מוכן").catch(() => {});
+      pairError = "";
+      return act({ action: "pair", phone: pairPhone }, "הקוד מוכן").catch((e) => {
+        pairError = e.message;
+        render();
+      });
     }
     if (t.id === "saveSettings") {
       return act(
