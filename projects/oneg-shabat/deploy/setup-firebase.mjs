@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // One-time Firebase setup for the public summary page, using a signed-in Google account
 // (gcloud auth application-default login). Safe to run again: it refreshes everything.
-//   1. Enables Email/Password sign-in and creates the bot's own Firebase Auth user.
-//   2. Lets only that user write onegShabat/* in Firestore (../../../firestore.rules) and deploys the rules.
+//   1. Creates the bot's write key (kept when it already exists).
+//   2. Deploys ../../../firestore.rules with the key filled in: only the bot may write onegShabat/*.
 //   3. Deploys public/ to Firebase Hosting at https://<project>.web.app/oneg-shabat/
 //   4. Writes ../firebase-writer.json, which the publisher ships to the phone with the code.
 // Usage: node setup-firebase.mjs <firebase-project-id> [--hosting-only]
@@ -18,7 +18,6 @@ const projectDir = path.join(here, "..");
 const rulesFile = path.join(projectDir, "..", "..", "firestore.rules");
 const writerFile = path.join(projectDir, "firebase-writer.json");
 const DOC_PATH = "onegShabat/live";
-const BOT_EMAIL = "oneg-shabat-bot@run-on-phone.app";
 const PAGE_FILES = ["index.html", "app.js", "style.css", "favicon.svg"];
 
 const args = process.argv.slice(2);
@@ -65,41 +64,13 @@ async function webApiKey() {
   return cfg.apiKey;
 }
 
-// ------------------------------------------------------------- auth user
-async function botUser() {
-  console.log("▶ Enabling Email/Password sign-in…");
-  try {
-    await api(
-      "PATCH",
-      `https://identitytoolkit.googleapis.com/admin/v2/projects/${project}/config?updateMask=signIn.email.enabled,signIn.email.passwordRequired`,
-      { signIn: { email: { enabled: true, passwordRequired: true } } },
-    );
-  } catch (e) {
-    if (/CONFIGURATION_NOT_FOUND/.test(e.message))
-      throw new Error("Firebase Authentication is not set up yet: Firebase console → Build → Authentication → Get started, then run again.");
-    throw e;
-  }
-  const password = crypto.randomBytes(24).toString("base64url");
-  const base = `https://identitytoolkit.googleapis.com/v1/projects/${project}/accounts`;
-  const found = await api("POST", `${base}:lookup`, { email: [BOT_EMAIL] });
-  let uid = found.users?.[0]?.localId;
-  if (uid) {
-    await api("POST", `${base}:update`, { localId: uid, password });
-  } else {
-    uid = (await api("POST", base, { email: BOT_EMAIL, password })).localId;
-  }
-  console.log(`✔ Bot user ${BOT_EMAIL} (${uid})`);
-  return { uid, password };
-}
-
 // ----------------------------------------------------------------- rules
-async function deployRules(uid) {
-  let rules = fs.readFileSync(rulesFile, "utf8");
-  rules = rules.replace(/(request\.auth\.uid == ")[^"]*(";\s*\n\s*}\s*\n\s*\/\/ oneg-shabat:end)/, `$1${uid}$2`);
-  if (!rules.includes(uid)) throw new Error("Could not find the oneg-shabat block in firestore.rules");
-  fs.writeFileSync(rulesFile, rules);
+async function deployRules(writeKey) {
+  const rules = fs.readFileSync(rulesFile, "utf8");
+  if (!rules.includes("ONEG_SHABAT_WRITE_KEY")) throw new Error("No oneg-shabat block in firestore.rules");
+  const content = rules.replaceAll("ONEG_SHABAT_WRITE_KEY", writeKey);
   const base = `https://firebaserules.googleapis.com/v1/projects/${project}`;
-  const ruleset = await api("POST", `${base}/rulesets`, { source: { files: [{ name: "firestore.rules", content: rules }] } });
+  const ruleset = await api("POST", `${base}/rulesets`, { source: { files: [{ name: "firestore.rules", content }] } });
   const name = `projects/${project}/releases/cloud.firestore`;
   const exists = await api("GET", `${base}/releases/cloud.firestore`, null, { allow404: true });
   if (exists) await api("PATCH", `${base}/releases/cloud.firestore`, { release: { name, rulesetName: ruleset.name } });
@@ -125,7 +96,7 @@ async function deployHosting(apiKey) {
   }
   const version = await api("POST", `https://firebasehosting.googleapis.com/v1beta1/sites/${site}/versions`, {
     config: {
-      redirects: [{ glob: "/oneg-shabat", location: "/oneg-shabat/", statusCode: 301 }],
+      trailingSlashBehavior: "ADD",
       headers: [{ glob: "**", headers: { "Cache-Control": "no-cache" } }],
     },
   });
@@ -143,18 +114,9 @@ async function deployHosting(apiKey) {
 
 const apiKey = await webApiKey();
 const publicUrl = await deployHosting(apiKey);
-if (hostingOnly) {
-  if (fs.existsSync(writerFile)) {
-    const w = JSON.parse(fs.readFileSync(writerFile, "utf8"));
-    fs.writeFileSync(writerFile, JSON.stringify({ ...w, apiKey, publicUrl }, null, 2));
-  }
-} else {
-  const { uid, password } = await botUser();
-  await deployRules(uid);
-  fs.writeFileSync(
-    writerFile,
-    JSON.stringify({ projectId: project, apiKey, email: BOT_EMAIL, password, uid, docPath: DOC_PATH, publicUrl }, null, 2),
-  );
-  console.log(`✔ Wrote ${writerFile} (shipped to the phone by publish.mjs, not committed)`);
-}
+const previous = fs.existsSync(writerFile) ? JSON.parse(fs.readFileSync(writerFile, "utf8")) : {};
+const writeKey = previous.writeKey || crypto.randomBytes(24).toString("hex");
+if (!hostingOnly) await deployRules(writeKey);
+fs.writeFileSync(writerFile, JSON.stringify({ projectId: project, apiKey, writeKey, docPath: DOC_PATH, publicUrl }, null, 2));
+console.log(`✔ Wrote ${writerFile} (shipped to the phone by publish.mjs, not committed)`);
 console.log(`\nPublic link: ${publicUrl}`);
