@@ -6,6 +6,10 @@
   const dayLabel = (d) => d.split("-").reverse().slice(0, 2).join(".");
   let S = null;
   let peopleFilter = "";
+  let pairPhone = "";
+  try {
+    pairPhone = localStorage.getItem("pairPhone") || "";
+  } catch {}
   const openDetails = new Set();
 
   function toast(msg) {
@@ -49,15 +53,24 @@
       return `<section class="card"><h2><span class="dot on"></span>וואטסאפ מחובר</h2>
         <div class="sub">מחובר כ-${esc(w.me)}. הבוט רק קורא סקרים, הוא לא כותב בקבוצה.</div>
         <button class="danger" data-act="logout">ניתוק וחיבור מספר אחר</button></section>`;
-    if (w.status === "qr")
+    if (w.status === "qr") {
+      const pairing = w.pairing
+        ? `<div class="big-code">${esc(w.pairing.code)}</div>
+          <div class="row" style="justify-content:center"><button data-copy="${esc(w.pairing.code.replace("-", ""))}">📋 העתק קוד</button></div>
+          <ol class="steps">
+            <li>פותחים וואטסאפ ← ⋮ (או הגדרות) ← <b>מכשירים מקושרים</b> ← <b>קישור מכשיר</b></li>
+            <li>בתחתית מסך הסריקה: <b>"קישור עם מספר טלפון במקום זאת"</b></li>
+            <li>מקלידים את הקוד שלמעלה. הוא בתוקף כ-3 דקות (אפשר לבקש חדש)</li>
+          </ol>`
+        : "";
       return `<section class="card"><h2><span class="dot wait"></span>חיבור וואטסאפ</h2>
-        <div class="sub">בטלפון שנמצא בקבוצת עונג שבת: וואטסאפ ← ⋮ ← מכשירים מקושרים ← קישור מכשיר, וסורקים:</div>
-        <img class="qr" src="${w.qr}" alt="QR">
-        <details ${openDetails.has("pair") ? "open" : ""} data-key="pair"><summary>או: קישור עם מספר טלפון (בלי סריקה)</summary>
-          <div class="row" style="margin-top:8px"><input class="grow" type="tel" id="pairPhone" placeholder="050-1234567"><button class="primary" id="pairBtn">קבל קוד</button></div>
-          <div id="pairCode"></div>
-          <div class="sub">בוואטסאפ: מכשירים מקושרים ← קישור מכשיר ← "קישור עם מספר טלפון במקום זאת", ומזינים את הקוד.</div>
-        </details></section>`;
+        <div class="sub">מזינים את המספר של הטלפון שנמצא בקבוצת עונג שבת (גם אם זה הטלפון הזה) ומקבלים קוד לחיבור, בלי לסרוק.</div>
+        <div class="row"><input class="grow" type="tel" id="pairPhone" inputmode="tel" placeholder="050-1234567" value="${esc(pairPhone)}"><button class="primary" id="pairBtn">${w.pairing ? "קוד חדש" : "קבל קוד"}</button></div>
+        ${pairing}
+        <details ${openDetails.has("qr") ? "open" : ""} data-key="qr" style="margin-top:12px"><summary>או: סריקת ברקוד מטלפון אחר</summary>
+          <div class="sub" style="margin-top:6px">בטלפון שבקבוצה: וואטסאפ ← מכשירים מקושרים ← קישור מכשיר, וסורקים:</div>
+          <img class="qr" src="${w.qr}" alt="QR"></details></section>`;
+    }
     return `<section class="card"><h2><span class="dot off"></span>וואטסאפ: ${w.status === "closed" ? "מתחבר מחדש…" : "מתחבר…"}</h2>
       <div class="sub">${esc(w.error || "")}</div></section>`;
   }
@@ -196,10 +209,13 @@
     }
     if (t.dataset.copy) return copy(t.dataset.copy);
     if (t.id === "pairBtn") {
-      const j = await act({ action: "pair", phone: $("pairPhone").value });
-      openDetails.add("pair");
-      setTimeout(() => ($("pairCode").innerHTML = `<div class="big-code">${esc(j.code)}</div>`), 50);
-      return;
+      pairPhone = $("pairPhone").value.trim();
+      try {
+        localStorage.setItem("pairPhone", pairPhone);
+      } catch {}
+      t.disabled = true;
+      t.textContent = "מבקש קוד…";
+      return act({ action: "pair", phone: pairPhone }, "הקוד מוכן").catch(() => {});
     }
     if (t.id === "saveSettings") {
       return act(
@@ -245,6 +261,7 @@
   }, true);
 
   document.addEventListener("input", (e) => {
+    if (e.target.id === "pairPhone") pairPhone = e.target.value;
     if (e.target.id !== "peopleFilter") return;
     peopleFilter = e.target.value.trim();
     const pos = e.target.selectionStart;
