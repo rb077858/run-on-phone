@@ -11,7 +11,7 @@
 |---|---|
 | `/` | דף הסיכום: מגיעים / אולי / לא מגיעים / לא ענו, מה מוביל כרגע, וכל סקר עם שמות |
 | `/admin` | ממשק ניהול: **רק מהמכשיר שמריץ את הבוט** (127.0.0.1) |
-| `https://<project>.web.app/oneg-shabat/` | הקישור הציבורי (Firebase Hosting), מתעדכן בכל סנכרון |
+| https://run-on-phone.web.app/oneg-shabat/ | הקישור הציבורי (Firebase Hosting), מתעדכן בכל סנכרון |
 
 ### ממשק הניהול
 - חיבור וואטסאפ: סריקת QR או קוד קישור לפי מספר טלפון, וניתוק.
@@ -44,8 +44,12 @@ irm https://raw.githubusercontent.com/rb077858/run-on-phone/main/projects/oneg-s
 ## הגדרת Firebase (חד-פעמית, מהסשן של Claude)
 ```bash
 gcloud auth application-default login --no-launch-browser
-node projects/oneg-shabat/deploy/setup-firebase.mjs <project-id>
-GOOGLE_CLOUD_PROJECT=<project-id> node publisher/publish.mjs projects/oneg-shabat
+node projects/oneg-shabat/deploy/setup-firebase.mjs run-on-phone
+GOOGLE_CLOUD_PROJECT=run-on-phone node publisher/publish.mjs projects/oneg-shabat
 ```
-הסקריפט מפעיל התחברות Email/Password, יוצר משתמש Firebase לבוט שמורשה לכתוב רק את `onegShabat/*`, מעדכן ומפרסם את `firestore.rules`, מעלה את הדף ל-Firebase Hosting, וכותב `firebase-writer.json`. הקובץ לא נשמר ב-git (המאגר ציבורי), אבל נארז לטלפון עם הקוד.
-עדכון הדף הציבורי בלבד: `--hosting-only`.
+- הקישור הציבורי: https://run-on-phone.web.app/oneg-shabat/ . הוא קורא את המסמך `onegShabat/live` ב-Firestore.
+- רק מי שמחזיק את מפתח הכתיבה יכול לעדכן את המסמך: כל כתיבה חייבת לבוא באותה פעולה עם כתיבה למסמך סודי `onegShabatKeys/<מפתח>` עם אותו nonce חדש.
+- המפתח נמצא רק בחוקי האבטחה (שאינם ציבוריים) וב-`firebase-writer.json`. הקובץ לא נשמר ב-git (המאגר ציבורי), אבל נארז לטלפון עם הקוד.
+- הסקריפט שומר על המפתח הקיים אם הקובץ קיים. אם הקובץ אבד, הרצה חוזרת יוצרת מפתח חדש, ואז צריך לפרסם שוב לטלפון.
+- `publisher/deploy-rules.mjs` ממלא את המפתח בעצמו כשהקובץ קיים.
+- עדכון הדף הציבורי בלבד: `--hosting-only`.

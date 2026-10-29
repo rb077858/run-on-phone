@@ -4,15 +4,26 @@ rules_version = '2';
 // - The phone app reads projects anonymously, but only by exact code (get), never by
 //   listing, so codes can't be enumerated.
 // - Only the PC publisher writes, using a service account (which bypasses these rules).
-// - onegShabat/*: the public summary of projects/oneg-shabat. Anyone may read it; only the
-//   bot's Firebase Auth user may write (the uid is set by projects/oneg-shabat/deploy/setup-firebase.mjs).
+// - onegShabat/*: the public summary of projects/oneg-shabat. Anyone may read it; only the bot,
+//   which knows the write key, may write. The key is never committed: deploy-rules.mjs and
+//   projects/oneg-shabat/deploy/setup-firebase.mjs fill it in from projects/oneg-shabat/firebase-writer.json.
 service cloud.firestore {
   match /databases/{database}/documents {
     // oneg-shabat:start
+    // A write to onegShabat/* must come in one batch with a write to the secret key document,
+    // carrying the same fresh nonce. ONEG_SHABAT_WRITE_KEY is replaced with the real key on deploy.
+    function onegKeyDoc() {
+      return /databases/$(database)/documents/onegShabatKeys/ONEG_SHABAT_WRITE_KEY;
+    }
     match /onegShabat/{doc} {
       allow get: if true;
       allow list: if false;
-      allow write: if request.auth != null && request.auth.uid == "SET_BY_SETUP_SCRIPT";
+      allow write: if getAfter(onegKeyDoc()).data.nonce == request.resource.data.nonce
+        && (!exists(onegKeyDoc()) || get(onegKeyDoc()).data.nonce != request.resource.data.nonce);
+    }
+    match /onegShabatKeys/{key} {
+      allow read: if false;
+      allow write: if key == "ONEG_SHABAT_WRITE_KEY";
     }
     // oneg-shabat:end
 
